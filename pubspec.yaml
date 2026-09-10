@@ -1,0 +1,44 @@
+name: exam_hook
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  firebase_core: ^2.24.2
+  cloud_firestore: ^4.13.6
+  supabase_flutter: ^2.16.0
+  provider: ^6.1.5+1
+  google_fonts: ^8.2.1
+  intl: ^0.20.3
+  flutter_animate: ^4.5.2
+  url_launcher: ^6.3.2
+  share_plus: ^7.2.2
+  flutter_pdfview: ^1.3.2
+  path_provider: ^2.1.4
+  http: ^1.2.2
+  uuid: ^4.6.0
+  image_picker: ^1.0.7
+  shared_preferences: ^2.5.5
+  file_picker: ^8.1.2
+  google_generative_ai: ^0.4.7
+  flutter_math_fork: ^0.7.4
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/logo.jpeg
+    - assets/images/round.jpeg
+    - assets/images/text.jpeg
