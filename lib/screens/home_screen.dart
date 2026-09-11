@@ -1,72 +1,62 @@
-Import ‘package:flutter/material.dart’;
-Import ‘package:cloud_firestore/cloud_firestore.dart’;
-Import ‘package:google_fonts/google_fonts.dart’;
-Import ‘package:url_launcher/url_launcher.dart’;
-Import ‘package:intl/intl.dart’;
-Import ‘package:shared_preferences/shared_preferences.dart’;
-Import ‘package:share_plus/share_plus.dart’;
-Import ‘package:flutter/foundation.dart’ show kIsWeb;
-Import ‘package:google_generative_ai/google_generative_ai.dart’;
-Import ‘package:http/http.dart’ as http;
-Import ‘package:flutter_math_fork/flutter_math.dart’;
-Import ‘dart:convert’;
-Import ‘dart:typed_data’;
-
-Import ‘admin_dashboard.dart’;
-Import ‘pdf_viewer.dart’;
-Import ‘student_upload.dart’;
-
-// TODO: Move this to –dart-define for production
-const String _geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
-
-Final model = GenerativeModel(
-  Model: ‘gemini-3.5-flash-lite’,
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter_math_fork/flutter_math.dart';
+import 'dart:convert';
+import 'package:flutter/services.dart'; // for Clipboard
+import 'dart:typed_data';
+import 'admin_dashboard.dart';
+import 'pdf_viewer.dart';
+import 'student_upload.dart';
+// TODO: Move this to --dart-define for production
+const String _geminiApiKey = " ";
+final model = GenerativeModel(
+  model: 'gemini-3.6-flash',
   apiKey: _geminiApiKey,
 );
-
-Class Flashcard {
-  Final String question;
-  Final String answer;
-
+class Flashcard {
+  final String question;
+  final String answer;
   Flashcard({
-Required this.question,
-Required this.answer,
+    required this.question,
+    required this.answer,
   });
 }
-
 // -----------------------------------------------------------------------------
 // HELPER: Auto-detect and render LaTeX without $ signs
 // -----------------------------------------------------------------------------
-
 Widget _buildMathText(
   String text, {
-  TextStyle? Style,
+  TextStyle? style,
   TextAlign align = TextAlign.left,
 }) {
-  Final List<Widget> widgets = [];
-  Final List<String> lines = text.split(‘\n’);
-
-  For (int I = 0; I < lines.length; i++) {
-Final String line = lines[i].trim();
-
-If (line.isEmpty) {
-      Continue;
-}
-
-Final bool looksLikeMath =
+  final List<Widget> widgets = [];
+  final List<String> lines = text.split('\n');
+  for (int i = 0; i < lines.length; i++) {
+    final String line = lines[i].trim();
+    if (line.isEmpty) {
+      continue;
+    }
+    final bool looksLikeMath =
         RegExp(
-          R’[=^_]|\\frac|\\sqrt|\\alpha|\\beta|\\gamma|\\pi|\\theta|\\pm’,
+          r'[=^_]|\\frac|\\sqrt|\\alpha|\\beta|\\gamma|\\pi|\\theta|\\pm',
         ).hasMatch(line) &&
-        Line.length < 150;
-
-If (looksLikeMath) {
-      Try {
-        Widgets.add(
+        line.length < 150;
+    if (looksLikeMath) {
+      try {
+        widgets.add(
           Center(
-            Child: Padding(
-              Padding: const EdgeInsets.symmetric(vertical: 4),
-              Child: Math.tex(
-                Line,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Math.tex(
+                line,
                 mathStyle: MathStyle.display,
                 textStyle: style?.copyWith(
                   fontSize: (style.fontSize ?? 16) + 2,
@@ -75,313 +65,251 @@ If (looksLikeMath) {
             ),
           ),
         );
-      } catch € {
-        Widgets.add(
+      } catch (e) {
+        widgets.add(
           Text(
-            Line,
-            Style: style,
+            line,
+            style: style,
             textAlign: align,
           ),
         );
       }
-} else {
-      Widgets.add(
+    } else {
+      widgets.add(
         Text(
-          Line,
-          Style: style,
+          line,
+          style: style,
           textAlign: align,
         ),
       );
-}
-
-If (I < lines.length – 1) {
-      Widgets.add(const SizedBox(height: 2));
-}
+    }
+    if (i < lines.length - 1) {
+      widgets.add(const SizedBox(height: 2));
+    }
   }
-
-  Return Column(
-mainAxisSize: MainAxisSize.min,
-crossAxisAlignment: CrossAxisAlignment.start,
-children: widgets,
+  return Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: widgets,
   );
 }
-
-Class HomeScreen extends StatefulWidget {
-  Const HomeScreen({super.key});
-
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
-
-Class _HomeScreenState extends State<HomeScreen> {
-  Final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  Final TextEditingController _searchController = TextEditingController();
-  Final TextEditingController _requestController = TextEditingController();
-
-  String selectedCourse = ‘All’;
-  String searchQuery = ‘’;
-
-  Final Set<String> likedDocs = {};
-  Final Set<String> ratedDocs = {};
+class _HomeScreenState extends State<HomeScreen> {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _requestController = TextEditingController();
+  String selectedCourse = 'All';
+  String searchQuery = '';
+  final Set<String> likedDocs = {};
+  final Set<String> ratedDocs = {};
   Set<String> favoriteDocs = {};
   Set<String> recentlyViewed = {};
-
   // Values saved by StudentUploadScreen.
   // They can be fileName, fileUrl, document ID, title, etc.
   List<String> myUploads = [];
-
-  String _themeMode = ‘light’;
-
-  Int _tapCount = 0;
+  String _themeMode = 'light';
+  int _tapCount = 0;
   DateTime? _lastTapTime;
-
-  Final List<Color> _cardColors = [
-Const Color(0xFF00C896),
-Const Color(0xFF3B82F6),
-Const Color(0xFFF59E0B),
-Const Color(0xFFEC4899),
-Const Color(0xFF8B5CF6),
+  final List<Color> _cardColors = [
+    const Color(0xFF00C896),
+    const Color(0xFF3B82F6),
+    const Color(0xFFF59E0B),
+    const Color(0xFFEC4899),
+    const Color(0xFF8B5CF6),
   ];
-
   @override
-  Void initState() {
-Super.initState();
-_loadPrefs();
+  void initState() {
+    super.initState();
+    _loadPrefs();
   }
-
   @override
-  Void dispose() {
+  void dispose() {
     _searchController.dispose();
     _requestController.dispose();
-Super.dispose();
+    super.dispose();
   }
-
   // ---------------------------------------------------------------------------
   // PREFERENCES
   // ---------------------------------------------------------------------------
-
   Future<void> _loadPrefs() async {
-Try {
-      Final SharedPreferences prefs =
-          Await SharedPreferences.getInstance();
-
-      If (!mounted) return;
-
+    try {
+      final SharedPreferences prefs =
+          await SharedPreferences.getInstance();
+      if (!mounted) return;
       setState(() {
-        _themeMode = prefs.getString(‘theme_mode’) ?? ‘light’;
-
+        _themeMode = prefs.getString('theme_mode') ?? 'light';
         favoriteDocs = Set<String>.from(
-          prefs.getStringList(‘favorites’) ?? [],
+          prefs.getStringList('favorites') ?? [],
         );
-
         recentlyViewed = Set<String>.from(
-          prefs.getStringList(‘recent’) ?? [],
+          prefs.getStringList('recent') ?? [],
         );
-
-        myUploads = prefs.getStringList(‘my_uploads’) ?? [];
+        myUploads = prefs.getStringList('my_uploads') ?? [];
       });
-
-      Await _checkTerms();
-} catch € {
-      debugPrint(‘Prefs error: $e’);
-}
+      await _checkTerms();
+    } catch (e) {
+      debugPrint('Prefs error: $e');
+    }
   }
-
   // ---------------------------------------------------------------------------
   // MY UPLOADS
   // ---------------------------------------------------------------------------
-
   Future<void> _clearUploadHistory() async {
-Try {
-      Final SharedPreferences prefs =
-          Await SharedPreferences.getInstance();
-
-      Await prefs.remove(‘my_uploads’);
-
-      If (!mounted) return;
-
+    try {
+      final SharedPreferences prefs =
+          await SharedPreferences.getInstance();
+      await prefs.remove('my_uploads');
+      if (!mounted) return;
       setState(() {
         myUploads.clear();
       });
-
       ScaffoldMessenger.of(context).showSnackBar(
-        Const SnackBar(
-          Content: Text(‘My Uploads history cleared’),
+        const SnackBar(
+          content: Text('My Uploads history cleared'),
         ),
       );
-} catch € {
-      If (!mounted) return;
-
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          Content: Text(‘Could not clear upload history: $e’),
+          content: Text('Could not clear upload history: $e'),
           backgroundColor: Colors.red,
         ),
       );
-}
+    }
   }
-
   String _normalizeUploadValue(dynamic value) {
-Return value?.toString().trim().toLowerCase() ?? ‘’;
+    return value?.toString().trim().toLowerCase() ?? '';
   }
-
   // Checks multiple identifiers so uploads remain visible
   // whether pending, approved or rejected.
-  Bool _isMyUpload(QueryDocumentSnapshot doc) {
-Final dynamic rawData = doc.data();
-
-If (rawData is! Map) {
-      Return false;
-}
-
-Final Map<String, dynamic> data =
+  bool _isMyUpload(QueryDocumentSnapshot doc) {
+    final dynamic rawData = doc.data();
+    if (rawData is! Map) {
+      return false;
+    }
+    final Map<String, dynamic> data =
         Map<String, dynamic>.from(rawData);
-
-Final Set<String> documentIdentifiers = {
+    final Set<String> documentIdentifiers = {
       _normalizeUploadValue(doc.id),
-      _normalizeUploadValue(data[‘id’]),
-      _normalizeUploadValue(data[‘fileName’]),
-      _normalizeUploadValue(data[‘fileUrl’]),
-      _normalizeUploadValue(data[‘url’]),
-      _normalizeUploadValue(data[‘title’]),
-      _normalizeUploadValue(data[‘uploadId’]),
-      _normalizeUploadValue(data[‘resourceId’]),
-};
-
+      _normalizeUploadValue(data['id']),
+      _normalizeUploadValue(data['fileName']),
+      _normalizeUploadValue(data['fileUrl']),
+      _normalizeUploadValue(data['url']),
+      _normalizeUploadValue(data['title']),
+      _normalizeUploadValue(data['uploadId']),
+      _normalizeUploadValue(data['resourceId']),
+    };
     documentIdentifiers.removeWhere(
       (value) => value.isEmpty,
-);
-
-For (final String savedUpload in myUploads) {
-      Final String normalizedSaved =
+    );
+    for (final String savedUpload in myUploads) {
+      final String normalizedSaved =
           _normalizeUploadValue(savedUpload);
-
-      If (normalizedSaved.isEmpty) {
-        Continue;
+      if (normalizedSaved.isEmpty) {
+        continue;
       }
-
-      If (documentIdentifiers.contains(normalizedSaved)) {
-        Return true;
+      if (documentIdentifiers.contains(normalizedSaved)) {
+        return true;
       }
-
-      For (final String identifier in documentIdentifiers) {
-        If (identifier == normalizedSaved) {
-          Return true;
+      for (final String identifier in documentIdentifiers) {
+        if (identifier == normalizedSaved) {
+          return true;
         }
-
-        If (identifier.endsWith(normalizedSaved) ||
+        if (identifier.endsWith(normalizedSaved) ||
             normalizedSaved.endsWith(identifier)) {
           return true;
         }
       }
-}
-
-Return false;
+    }
+    return false;
   }
-
   String _getUploadStatus(
     QueryDocumentSnapshot doc, {
-Required bool isPendingCollection,
+    required bool isPendingCollection,
   }) {
-Final dynamic rawData = doc.data();
-
-If (rawData is! Map) {
-      Return isPendingCollection ? ‘Pending’ : ‘Approved’;
-}
-
-Final Map<String, dynamic> data =
+    final dynamic rawData = doc.data();
+    if (rawData is! Map) {
+      return isPendingCollection ? 'Pending' : 'Approved';
+    }
+    final Map<String, dynamic> data =
         Map<String, dynamic>.from(rawData);
-
-Final dynamic rawStatus =
-        Data[‘status’] ??
-        Data[‘uploadStatus’] ??
-        Data[‘reviewStatus’];
-
-Final String status =
-        rawStatus?.toString().trim().toLowerCase() ?? ‘’;
-
-if (status.contains(‘reject’)) {
-      return ‘Rejected’;
-}
-
-If (status.contains(‘pending’) ||
-        Status.contains(‘review’) ||
-        Status.contains(‘waiting’)) {
-      Return ‘Pending’;
-}
-
-If (status.contains(‘approv’)) {
-      Return ‘Approved’;
-}
-
-If (isPendingCollection) {
-      Return ‘Pending’;
-}
-
-Return ‘Approved’;
+    final dynamic rawStatus =
+        data['status'] ??
+        data['uploadStatus'] ??
+        data['reviewStatus'];
+    final String status =
+        rawStatus?.toString().trim().toLowerCase() ?? '';
+    if (status.contains('reject')) {
+      return 'Rejected';
+    }
+    if (status.contains('pending') ||
+        status.contains('review') ||
+        status.contains('waiting')) {
+      return 'Pending';
+    }
+    if (status.contains('approv')) {
+      return 'Approved';
+    }
+    if (isPendingCollection) {
+      return 'Pending';
+    }
+    return 'Approved';
   }
-
   Color _getStatusColor(String status) {
-Switch (status.toLowerCase()) {
-      Case ‘approved’:
-        Return Colors.green;
-      Case ‘rejected’:
-        Return Colors.red;
-      Case ‘pending’:
-      Default:
-        Return Colors.orange;
-}
+    switch (status.toLowerCase()) {
+      case 'approved':
+        return Colors.green;
+      case 'rejected':
+        return Colors.red;
+      case 'pending':
+      default:
+        return Colors.orange;
+    }
   }
-
   IconData _getStatusIcon(String status) {
-Switch (status.toLowerCase()) {
-      Case ‘approved’:
-        Return Icons.check_circle;
-      Case ‘rejected’:
-        Return Icons.cancel;
-      Case ‘pending’:
-      Default:
-        Return Icons.pending;
-}
+    switch (status.toLowerCase()) {
+      case 'approved':
+        return Icons.check_circle;
+      case 'rejected':
+        return Icons.cancel;
+      case 'pending':
+      default:
+        return Icons.pending;
+    }
   }
-
   // ---------------------------------------------------------------------------
   // RECENT / FAVORITES / THEME
   // ---------------------------------------------------------------------------
-
   Future<void> _saveRecent(String docId) async {
-Try {
-      Final SharedPreferences prefs =
-          Await SharedPreferences.getInstance();
-
-      If (!mounted) return;
-
+    try {
+      final SharedPreferences prefs =
+          await SharedPreferences.getInstance();
+      if (!mounted) return;
       setState(() {
         recentlyViewed.remove(docId);
         recentlyViewed.add(docId);
-
         if (recentlyViewed.length > 10) {
           recentlyViewed.remove(recentlyViewed.first);
         }
       });
-
-      Await prefs.setStringList(
-        ‘recent’,
+      await prefs.setStringList(
+        'recent',
         recentlyViewed.toList(),
       );
-} catch € {
-      debugPrint(‘Recent error: $e’);
-}
+    } catch (e) {
+      debugPrint('Recent error: $e');
+    }
   }
-
   Future<void> _toggleFavorite(String docId) async {
-Try {
-      Final SharedPreferences prefs =
-          Await SharedPreferences.getInstance();
-
-      If (!mounted) return;
-
+    try {
+      final SharedPreferences prefs =
+          await SharedPreferences.getInstance();
+      if (!mounted) return;
       setState(() {
         if (favoriteDocs.contains(docId)) {
           favoriteDocs.remove(docId);
@@ -389,256 +317,225 @@ Try {
           favoriteDocs.add(docId);
         }
       });
-
-      Await prefs.setStringList(
-        ‘favorites’,
+      await prefs.setStringList(
+        'favorites',
         favoriteDocs.toList(),
       );
-} catch € {
-      debugPrint(‘Favorite error: $e’);
-}
+    } catch (e) {
+      debugPrint('Favorite error: $e');
+    }
   }
-
   Future<void> _saveTheme(String theme) async {
-Final SharedPreferences prefs =
-        Await SharedPreferences.getInstance();
-
-Await prefs.setString(‘theme_mode’, theme);
-
-If (!mounted) return;
-
-setState(() {
+    final SharedPreferences prefs =
+        await SharedPreferences.getInstance();
+    await prefs.setString('theme_mode', theme);
+    if (!mounted) return;
+    setState(() {
       _themeMode = theme;
-});
+    });
   }
-
   // ---------------------------------------------------------------------------
   // TERMS
   // ---------------------------------------------------------------------------
-
   Future<void> _checkTerms() async {
-Final SharedPreferences prefs =
-        Await SharedPreferences.getInstance();
-
-Final bool accepted =
-        Prefs.getBool(‘terms_accepted’) ?? false;
-
-If (!accepted && mounted) {
+    final SharedPreferences prefs =
+        await SharedPreferences.getInstance();
+    final bool accepted =
+        prefs.getBool('terms_accepted') ?? false;
+    if (!accepted && mounted) {
       _showTermsDialog();
-}
+    }
   }
-
-  Void _showTermsDialog() {
-showDialog(
+  void _showTermsDialog() {
+    showDialog(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
         return AlertDialog(
           title: Text(
-            ‘Terms & Conditions’,
-            Style: GoogleFonts.poppins(
+            'Terms & Conditions',
+            style: GoogleFonts.poppins(
               fontWeight: FontWeight.bold,
             ),
           ),
-          Content: SingleChildScrollView(
-            Child: Text(
-              ‘By using ExamHook you agree to:\n\n’
-              ‘1. Resources are for educational purposes only.\n’
-              ‘2. Do not redistribute files without permission.\n’
-              ‘3. Admin reserves the right to remove content.\n’
-              ‘4. We collect anonymous usage stats to improve the app.’,
-              Style: GoogleFonts.poppins(
+          content: SingleChildScrollView(
+            child: Text(
+              'By using ExamHook you agree to:\n\n'
+              '1. Resources are for educational purposes only.\n'
+              '2. Do not redistribute files without permission.\n'
+              '3. Admin reserves the right to remove content.\n'
+              '4. We collect anonymous usage stats to improve the app.',
+              style: GoogleFonts.poppins(
                 fontSize: 14,
               ),
             ),
           ),
-          Actions: [
+          actions: [
             TextButton(
               onPressed: () async {
                 final SharedPreferences prefs =
                     await SharedPreferences.getInstance();
-
                 await prefs.setBool(
-                  ‘terms_accepted’,
-                  True,
+                  'terms_accepted',
+                  true,
                 );
-
-                If (dialogContext.mounted) {
+                if (dialogContext.mounted) {
                   Navigator.pop(dialogContext);
                 }
               },
-              Child: const Text(
-                ‘Accept’,
-                Style: TextStyle(
-                  Color: Color(0xFF00C896),
+              child: const Text(
+                'Accept',
+                style: TextStyle(
+                  color: Color(0xFF00C896),
                 ),
               ),
             ),
           ],
         );
       },
-);
+    );
   }
-
   // ---------------------------------------------------------------------------
   // REQUEST NOTES
   // ---------------------------------------------------------------------------
-
-  Void _showRequestDialog() {
+  void _showRequestDialog() {
     _requestController.clear();
-
-showDialog(
+    showDialog(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: Text(
-            ‘Request Notes’,
-            Style: GoogleFonts.poppins(
+            'Request Notes',
+            style: GoogleFonts.poppins(
               fontWeight: FontWeight.bold,
             ),
           ),
-          Content: TextField(
-            Controller: _requestController,
-            Decoration: const InputDecoration(
-              labelText: ‘What subject/topic do you need?’,
+          content: TextField(
+            controller: _requestController,
+            decoration: const InputDecoration(
+              labelText: 'What subject/topic do you need?',
               border: OutlineInputBorder(),
             ),
             maxLines: 3,
           ),
-          Actions: [
+          actions: [
             TextButton(
               onPressed: () {
                 Navigator.pop(dialogContext);
               },
-              Child: const Text(‘Cancel’),
+              child: const Text('Cancel'),
             ),
             ElevatedButton(
               onPressed: () async {
                 final String request =
                     _requestController.text.trim();
-
-                If (request.isEmpty) {
-                  Return;
+                if (request.isEmpty) {
+                  return;
                 }
-
-                Try {
-                  Await _firestore.collection(‘requests’).add({
-                    ‘subject’: request,
-                    ‘message’: ‘User requested: $request’,
-                    ‘timestamp’: FieldValue.serverTimestamp(),
-                    ‘status’: ‘pending’,
+                try {
+                  await _firestore.collection('requests').add({
+                    'subject': request,
+                    'message': 'User requested: $request',
+                    'timestamp': FieldValue.serverTimestamp(),
+                    'status': 'pending',
                   });
-
-                  If (dialogContext.mounted) {
+                  if (dialogContext.mounted) {
                     Navigator.pop(dialogContext);
                   }
-
-                  If (!mounted) return;
-
+                  if (!mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
-                    Const SnackBar(
-                      Content: Text(‘Request sent to Admin!’),
+                    const SnackBar(
+                      content: Text('Request sent to Admin!'),
                       backgroundColor: Colors.green,
                     ),
                   );
-                } catch € {
-                  If (!mounted) return;
-
+                } catch (e) {
+                  if (!mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      Content: Text(‘Failed to send: $e’),
+                      content: Text('Failed to send: $e'),
                       backgroundColor: Colors.red,
                     ),
                   );
                 }
               },
-              Style: ElevatedButton.styleFrom(
+              style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF00C896),
               ),
-              Child: const Text(‘Send Request’),
+              child: const Text('Send Request'),
             ),
           ],
         );
       },
-);
+    );
   }
-
   // ---------------------------------------------------------------------------
   // OPEN RESOURCE
   // ---------------------------------------------------------------------------
-
   Future<void> _openResource(
-String docId,
-String url,
-String title,
+    String docId,
+    String url,
+    String title,
   ) async {
-Await _saveRecent(docId);
-
-Try {
-      Await _firestore
-          .collection(‘resources’)
+    await _saveRecent(docId);
+    try {
+      await _firestore
+          .collection('resources')
           .doc(docId)
           .update({
-        ‘downloads’: FieldValue.increment(1),
+        'downloads': FieldValue.increment(1),
       });
-} catch € {
-      debugPrint(‘Download counter error: $e’);
-}
-
-If (!mounted) return;
-
-Try {
-      Final Uri uri = Uri.parse(url);
-
-      If (kIsWeb) {
-        If (await canLaunchUrl(uri)) {
-          Await launchUrl(
-            Uri,
-            Mode: LaunchMode.externalApplication,
+    } catch (e) {
+      debugPrint('Download counter error: $e');
+    }
+    if (!mounted) return;
+    try {
+      final Uri uri = Uri.parse(url);
+      if (kIsWeb) {
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(
+            uri,
+            mode: LaunchMode.externalApplication,
           );
         }
-        Return;
+        return;
       }
-
-      If (url.toLowerCase().contains(‘.pdf’)) {
-        Await Navigator.push(
-          Context,
+      if (url.toLowerCase().contains('.pdf')) {
+        await Navigator.push(
+          context,
           MaterialPageRoute(
-            Builder: (_) => PdfViewerScreen(
+            builder: (_) => PdfViewerScreen(
               url: url,
               title: title,
             ),
           ),
         );
       } else {
-        If (await canLaunchUrl(uri)) {
-          Await launchUrl(
-            Uri,
-            Mode: LaunchMode.externalApplication,
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(
+            uri,
+            mode: LaunchMode.externalApplication,
           );
         }
       }
-} catch € {
-      If (!mounted) return;
-
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          Content: Text(‘Could not open file: $e’),
+          content: Text('Could not open file: $e'),
           backgroundColor: Colors.red,
         ),
       );
-}
+    }
   }
-
   // ---------------------------------------------------------------------------
   // AI FLASHCARDS FROM PDF
   // ---------------------------------------------------------------------------
-
   Future<void> _generateFlashcardsFromPdf(
-String pdfUrl,
-String title,
+    String pdfUrl,
+    String title,
   ) async {
-showDialog(
+    showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) {
@@ -646,91 +543,74 @@ showDialog(
           child: CircularProgressIndicator(),
         );
       },
-);
-
-Bool dialogClosed = false;
-
-Try {
-      Final http.Response response =
-          Await http.get(Uri.parse(pdfUrl));
-
-      If (response.statusCode < 200 ||
-          Response.statusCode >= 300) {
-        Throw Exception(
-          ‘Could not download PDF (${response.statusCode})’,
+    );
+    bool dialogClosed = false;
+    try {
+      final http.Response response =
+          await http.get(Uri.parse(pdfUrl));
+      if (response.statusCode < 200 ||
+          response.statusCode >= 300) {
+        throw Exception(
+          'Could not download PDF (${response.statusCode})',
         );
       }
-
-      Final Uint8List pdfBytes = response.bodyBytes;
-
-      Final TextPart prompt = TextPart(
-        R’’’
+      final Uint8List pdfBytes = response.bodyBytes;
+      final TextPart prompt = TextPart(
+        r'''
 Generate 10 flashcards from this PDF for high school exam prep.
-
 Rules:
 1. Return ONLY a valid JSON array. No markdown, no asterisks, no explanation.
-2. Format: [{“q”: “question”, “a”: “answer”}]
+2. Format: [{"q": "question", "a": "answer"}]
 3. For formulas write them in plain LaTeX without $ signs. Example: F = ma, E = mc^2, \frac{a}{b}, x^2
 4. Keep answers short, max 15 words.
-‘’’,
+''',
       );
-
-      Final DataPart pdfData = DataPart(
-        ‘application/pdf’,
+      final DataPart pdfData = DataPart(
+        'application/pdf',
         pdfBytes,
       );
-
-      Final GenerateContentResponse result =
-          Await model.generateContent(
+      final GenerateContentResponse result =
+          await model.generateContent(
         [
           Content.multi([
-            Prompt,
+            prompt,
             pdfData,
           ]),
         ],
       );
-
-      If (mounted) {
+      if (mounted) {
         Navigator.pop(context);
         dialogClosed = true;
       }
-
-      String text = result.text ?? ‘’;
-
-      Text = text
-          .replaceAll(‘```json’, ‘’)
-          .replaceAll(‘```’, ‘’)
+      String text = result.text ?? '';
+      text = text
+          .replaceAll('```json', '')
+          .replaceAll('```', '')
           .trim();
-
-      Final dynamic decoded = jsonDecode(text);
-
-      If (decoded is! List) {
-        Throw Exception(
-          ‘AI returned invalid flashcard data’,
+      final dynamic decoded = jsonDecode(text);
+      if (decoded is! List) {
+        throw Exception(
+          'AI returned invalid flashcard data',
         );
       }
-
-      Final List<Flashcard> cards = decoded
+      final List<Flashcard> cards = decoded
           .whereType<Map>()
           .map(
-            € => Flashcard(
-              Question: e[‘q’]?.toString() ?? ‘’,
-              Answer: e[‘a’]?.toString() ?? ‘’,
+            (e) => Flashcard(
+              question: e['q']?.toString() ?? '',
+              answer: e['a']?.toString() ?? '',
             ),
           )
           .where(
             (card) =>
-                Card.question.isNotEmpty &&
-                Card.answer.isNotEmpty,
+                card.question.isNotEmpty &&
+                card.answer.isNotEmpty,
           )
           .toList();
-
-      If (cards.isEmpty) {
-        Throw Exception(‘No flashcards were generated’);
+      if (cards.isEmpty) {
+        throw Exception('No flashcards were generated');
       }
-
-      If (!mounted) return;
-
+      if (!mounted) return;
       showDialog(
         context: context,
         builder: (_) {
@@ -740,173 +620,147 @@ Rules:
           );
         },
       );
-} catch € {
-      If (mounted && !dialogClosed) {
+    } catch (e) {
+      if (mounted && !dialogClosed) {
         Navigator.pop(context);
       }
-
-      If (mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            Content: Text(
-              ‘Failed to generate flashcards: $e’,
+            content: Text(
+              'Failed to generate flashcards: $e',
             ),
             backgroundColor: Colors.red,
           ),
         );
       }
-}
+    }
   }
-
   // ---------------------------------------------------------------------------
   // SHARE / LIKE / RATE
   // ---------------------------------------------------------------------------
-
-  Void _shareResource(
-String title,
-String url,
+  void _shareResource(
+    String title,
+    String url,
   ) {
-Share.share(
-      ‘Check out “$title” on ExamHook\n$url’,
-);
+    Share.share(
+      'Check out "$title" on ExamHook\n$url',
+    );
   }
-
   Future<void> _likeResource(String docId) async {
-If (likedDocs.contains(docId)) {
-      Return;
-}
-
-Try {
-      Await _firestore
-          .collection(‘resources’)
+    if (likedDocs.contains(docId)) {
+      return;
+    }
+    try {
+      await _firestore
+          .collection('resources')
           .doc(docId)
           .update({
-        ‘likes’: FieldValue.increment(1),
+        'likes': FieldValue.increment(1),
       });
-
-      If (!mounted) return;
-
+      if (!mounted) return;
       setState(() {
         likedDocs.add(docId);
       });
-} catch € {
-      debugPrint(‘Like error: $e’);
-}
+    } catch (e) {
+      debugPrint('Like error: $e');
+    }
   }
-
   Future<void> _rateResource(
-String docId,
-Double rating,
+    String docId,
+    double rating,
   ) async {
-If (ratedDocs.contains(docId)) {
-      Return;
-}
-
-Try {
-      Final DocumentSnapshot doc =
-          Await _firestore
-              .collection(‘resources’)
+    if (ratedDocs.contains(docId)) {
+      return;
+    }
+    try {
+      final DocumentSnapshot doc =
+          await _firestore
+              .collection('resources')
               .doc(docId)
               .get();
-
-      Final dynamic rawRating =
-          Doc.data() is Map
-              ? (doc.data() as Map)[‘rating’]
+      final dynamic rawRating =
+          doc.data() is Map
+              ? (doc.data() as Map)['rating']
               : null;
-
-      Final dynamic rawRatingCount =
-          Doc.data() is Map
-              ? (doc.data() as Map)[‘ratingCount’]
+      final dynamic rawRatingCount =
+          doc.data() is Map
+              ? (doc.data() as Map)['ratingCount']
               : null;
-
-      Final double currentRating =
+      final double currentRating =
           rawRating is num
               ? rawRating.toDouble()
               : double.tryParse(
-                    rawRating?.toString() ?? ‘’,
+                    rawRating?.toString() ?? '',
                   ) ??
                   0.0;
-
-      Final int ratingCount =
+      final int ratingCount =
           rawRatingCount is num
               ? rawRatingCount.toInt()
               : int.tryParse(
-                    rawRatingCount?.toString() ?? ‘’,
+                    rawRatingCount?.toString() ?? '',
                   ) ??
                   0;
-
-      Final double newRating =
+      final double newRating =
           ((currentRating * ratingCount) + rating) /
           (ratingCount + 1);
-
-      Await _firestore
-          .collection(‘resources’)
+      await _firestore
+          .collection('resources')
           .doc(docId)
           .update({
-        ‘rating’: newRating,
-        ‘ratingCount’: FieldValue.increment(1),
+        'rating': newRating,
+        'ratingCount': FieldValue.increment(1),
       });
-
-      If (!mounted) return;
-
+      if (!mounted) return;
       setState(() {
         ratedDocs.add(docId);
       });
-} catch € {
-      debugPrint(‘Rating error: $e’);
-}
+    } catch (e) {
+      debugPrint('Rating error: $e');
+    }
   }
-
   // ---------------------------------------------------------------------------
   // ADMIN ACCESS
   // ---------------------------------------------------------------------------
-
-  Void _handleHeaderTap() {
-Final DateTime now = DateTime.now();
-
-If (_lastTapTime == null ||
-        Now.difference(_lastTapTime!) >
-            Const Duration(seconds: 2)) {
+  void _handleHeaderTap() {
+    final DateTime now = DateTime.now();
+    if (_lastTapTime == null ||
+        now.difference(_lastTapTime!) >
+            const Duration(seconds: 2)) {
       _tapCount = 1;
-} else {
+    } else {
       _tapCount++;
-}
-
-_lastTapTime = now;
-
-If (_tapCount >= 5) {
+    }
+    _lastTapTime = now;
+    if (_tapCount >= 5) {
       _tapCount = 0;
-
       Navigator.push(
-        Context,
+        context,
         MaterialPageRoute(
-          Builder: (_) => const AdminDashboard(),
+          builder: (_) => const AdminDashboard(),
         ),
       );
-
       ScaffoldMessenger.of(context).showSnackBar(
-        Const SnackBar(
-          Content: Text(‘Admin Access Granted’),
+        const SnackBar(
+          content: Text('Admin Access Granted'),
           backgroundColor: Colors.green,
         ),
       );
-}
+    }
   }
-
   // ---------------------------------------------------------------------------
   // GEMINI
   // ---------------------------------------------------------------------------
-
-  Void _showGeminiChat() {
+  void _showGeminiChat() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true, 
       builder: (_) => const _GeminiChatSheet(),
-);
+    );
   }
-
-  Void _showFlashcards(String subject) {
-showDialog(
+  void _showFlashcards(String subject) {
+    showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) {
@@ -914,268 +768,231 @@ showDialog(
           subject: subject,
         );
       },
-);
+    );
   }
-
   // ---------------------------------------------------------------------------
   // FORMATTING HELPERS
   // ---------------------------------------------------------------------------
-
   String _formatDate(dynamic timestamp) {
-Try {
-      DateTime? Date;
-
-      If (timestamp is Timestamp) {
-        Date = timestamp.toDate();
+    try {
+      DateTime? date;
+      if (timestamp is Timestamp) {
+        date = timestamp.toDate();
       } else if (timestamp is DateTime) {
-        Date = timestamp;
+        date = timestamp;
       }
-
-      If (date == null) {
-        Return ‘’;
+      if (date == null) {
+        return '';
       }
-
-      Return DateFormat(
-        ‘dd MMM yyyy, hh:mm a’,
+      return DateFormat(
+        'dd MMM yyyy, hh:mm a',
       ).format(date);
-} catch € {
-      Return ‘’;
-}
+    } catch (e) {
+      return '';
+    }
   }
-
   String _formatBytes(dynamic value) {
-Int bytes = 0;
-
-If (value is num) {
-      Bytes = value.toInt();
-} else {
-      Bytes = int.tryParse(
-            Value?.toString() ?? ‘’,
+    int bytes = 0;
+    if (value is num) {
+      bytes = value.toInt();
+    } else {
+      bytes = int.tryParse(
+            value?.toString() ?? '',
           ) ??
           0;
-}
-
-If (bytes < 1024) {
-      Return ‘$bytes B’;
-}
-
-If (bytes < 1048576) {
-      Return ‘${(bytes / 1024).toStringAsFixed(1)} KB’;
-}
-
-If (bytes < 1073741824) {
-      Return ‘${(bytes / 1048576).toStringAsFixed(1)} MB’;
-}
-
-Return ‘${(bytes / 1073741824).toStringAsFixed(1)} GB’;
+    }
+    if (bytes < 1024) {
+      return '$bytes B';
+    }
+    if (bytes < 1048576) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+    if (bytes < 1073741824) {
+      return '${(bytes / 1048576).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / 1073741824).toStringAsFixed(1)} GB';
   }
-
   Color _getCardColor(String course) {
-Final int index =
-        Course.hashCode % _cardColors.length;
-
-Return _cardColors[index.abs()];
+    final int index =
+        course.hashCode % _cardColors.length;
+    return _cardColors[index.abs()];
   }
-
   IconData _getFileIcon(String url) {
-Final String lower =
+    final String lower =
         url.toLowerCase();
-
-if (lower.contains(‘.pdf’)) {
+    if (lower.contains('.pdf')) {
       return Icons.picture_as_pdf;
-}
-
-If (lower.contains(‘.jpg’) ||
-        Lower.contains(‘.jpeg’) ||
-        Lower.contains(‘.png’) ||
-        Lower.contains(‘.gif’) ||
-        Lower.contains(‘.webp’)) {
-      Return Icons.image;
-}
-
-If (lower.contains(‘.mp4’) ||
-        Lower.contains(‘.mov’) ||
-        Lower.contains(‘.avi’)) {
-      Return Icons.video_file;
-}
-
-If (lower.contains(‘.doc’) ||
-        Lower.contains(‘.docx’)) {
-      Return Icons.description;
-}
-
-If (lower.contains(‘.xls’) ||
-        Lower.contains(‘.xlsx’)) {
-      Return Icons.table_chart;
-}
-
-If (lower.contains(‘.ppt’) ||
-        Lower.contains(‘.pptx’)) {
-      Return Icons.slideshow;
-}
-
-Return Icons.insert_drive_file;
+    }
+    if (lower.contains('.jpg') ||
+        lower.contains('.jpeg') ||
+        lower.contains('.png') ||
+        lower.contains('.gif') ||
+        lower.contains('.webp')) {
+      return Icons.image;
+    }
+    if (lower.contains('.mp4') ||
+        lower.contains('.mov') ||
+        lower.contains('.avi')) {
+      return Icons.video_file;
+    }
+    if (lower.contains('.doc') ||
+        lower.contains('.docx')) {
+      return Icons.description;
+    }
+    if (lower.contains('.xls') ||
+        lower.contains('.xlsx')) {
+      return Icons.table_chart;
+    }
+    if (lower.contains('.ppt') ||
+        lower.contains('.pptx')) {
+      return Icons.slideshow;
+    }
+    return Icons.insert_drive_file;
   }
-
   // ---------------------------------------------------------------------------
   // MY UPLOADS VIEW
   // -----------------------------------------------------------------------------
-
   Widget _buildMyUploadsView(
     List<QueryDocumentSnapshot> approvedDocs,
-Color primaryGreen,
+    Color primaryGreen,
   ) {
-Return StreamBuilder<QuerySnapshot>(
-      Stream: _firestore
-          .collection(‘resources_pending’)
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('resources_pending')
           .orderBy(
-            ‘uploadedAt’,
-            Descending: true,
+            'uploadedAt',
+            descending: true,
           )
           .snapshots(),
-      Builder: (context, pendingSnap) {
-        Final List<_MyUploadItem> uploads = [];
-
+      builder: (context, pendingSnap) {
+        final List<_MyUploadItem> uploads = [];
         // APPROVED RESOURCES
-        For (final QueryDocumentSnapshot doc
-            In approvedDocs) {
-          If (_isMyUpload(doc)) {
-            Uploads.add(
+        for (final QueryDocumentSnapshot doc
+            in approvedDocs) {
+          if (_isMyUpload(doc)) {
+            uploads.add(
               _MyUploadItem(
-                Document: doc,
+                document: doc,
                 isPendingCollection: false,
               ),
             );
           }
         }
-
         // PENDING / REJECTED RESOURCES
-        If (pendingSnap.hasData) {
-          For (final QueryDocumentSnapshot doc
-              In pendingSnap.data!.docs) {
-            If (_isMyUpload(doc)) {
-              Uploads.add(
+        if (pendingSnap.hasData) {
+          for (final QueryDocumentSnapshot doc
+              in pendingSnap.data!.docs) {
+            if (_isMyUpload(doc)) {
+              uploads.add(
                 _MyUploadItem(
-                  Document: doc,
+                  document: doc,
                   isPendingCollection: true,
                 ),
               );
             }
           }
         }
-
         // Remove duplicate documents.
-        Final Set<String> seenKeys = {};
-        Uploads.removeWhere((item) {
-          Final String key =
-              ‘${item.isPendingCollection ? ‘pending’ : ‘approved’}_${item.document.id}’;
-
-          If (seenKeys.contains(key)) {
-            Return true;
+        final Set<String> seenKeys = {};
+        uploads.removeWhere((item) {
+          final String key =
+              '${item.isPendingCollection ? 'pending' : 'approved'}_${item.document.id}';
+          if (seenKeys.contains(key)) {
+            return true;
           }
-
           seenKeys.add(key);
           return false;
         });
-
         // Sort newest first.
-        Uploads.sort((a, b) {
-          Final dynamic aData = a.document.data();
-          Final dynamic bData = b.document.data();
-
+        uploads.sort((a, b) {
+          final dynamic aData = a.document.data();
+          final dynamic bData = b.document.data();
           DateTime? aDate;
           DateTime? bDate;
-
-          If (aData is Map &&
-              aData[‘uploadedAt’] is Timestamp) {
+          if (aData is Map &&
+              aData['uploadedAt'] is Timestamp) {
             aDate =
-                (aData[‘uploadedAt’] as Timestamp).toDate();
+                (aData['uploadedAt'] as Timestamp).toDate();
           }
-
-          If (bData is Map &&
-              bData[‘uploadedAt’] is Timestamp) {
+          if (bData is Map &&
+              bData['uploadedAt'] is Timestamp) {
             bDate =
-                (bData[‘uploadedAt’] as Timestamp).toDate();
+                (bData['uploadedAt'] as Timestamp).toDate();
           }
-
-          If (aDate == null && bDate == null) {
-            Return 0;
+          if (aDate == null && bDate == null) {
+            return 0;
           }
-
-          If (aDate == null) {
-            Return 1;
+          if (aDate == null) {
+            return 1;
           }
-
-          If (bDate == null) {
-            Return -1;
+          if (bDate == null) {
+            return -1;
           }
-
-          Return bDate.compareTo(aDate);
+          return bDate.compareTo(aDate);
         });
-
-        If (uploads.isEmpty) {
-          Return Center(
-            Child: SingleChildScrollView(
-              Child: Column(
+        if (uploads.isEmpty) {
+          return Center(
+            child: SingleChildScrollView(
+              child: Column(
                 mainAxisAlignment:
                     MainAxisAlignment.center,
-                Children: [
+                children: [
                   Icon(
                     Icons.cloud_upload,
-                    Size: 80,
-                    Color: Colors.grey.shade400,
+                    size: 80,
+                    color: Colors.grey.shade400,
                   ),
-                  Const SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   Text(
-                    ‘No uploads yet’,
-                    Style: GoogleFonts.poppins(
+                    'No uploads yet',
+                    style: GoogleFonts.poppins(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  Const SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
-                    ‘Files you upload will appear here.’,
+                    'Files you upload will appear here.',
                     textAlign: TextAlign.center,
                     style: GoogleFonts.poppins(
                       fontSize: 13,
                       color: Colors.grey,
                     ),
                   ),
-                  Const SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   ElevatedButton.icon(
                     onPressed: () {
                       Navigator.push(
-                        Context,
+                        context,
                         MaterialPageRoute(
-                          Builder: (_) =>
-                              Const StudentUploadScreen(),
+                          builder: (_) =>
+                              const StudentUploadScreen(),
                         ),
                       );
                     },
-                    Icon: const Icon(
+                    icon: const Icon(
                       Icons.upload_file,
                     ),
-                    Label: const Text(
-                      ‘Upload a File’,
+                    label: const Text(
+                      'Upload a File',
                     ),
-                    Style: ElevatedButton.styleFrom(
+                    style: ElevatedButton.styleFrom(
                       backgroundColor:
                           primaryGreen,
                       foregroundColor:
                           Colors.white,
                     ),
                   ),
-                  Const SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   TextButton.icon(
                     onPressed: myUploads.isEmpty
                         ? null
                         : _clearUploadHistory,
-                    Icon: const Icon(
+                    icon: const Icon(
                       Icons.delete_outline,
                     ),
-                    Label: const Text(
-                      ‘Clear History’,
+                    label: const Text(
+                      'Clear History',
                     ),
                   ),
                 ],
@@ -1183,20 +1000,19 @@ Return StreamBuilder<QuerySnapshot>(
             ),
           );
         }
-
-        Return Column(
-          Children: [
+        return Column(
+          children: [
             Padding(
-              Padding: const EdgeInsets.symmetric(
-                Horizontal: 16,
-                Vertical: 10,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 10,
               ),
-              Child: Row(
-                Children: [
+              child: Row(
+                children: [
                   Expanded(
-                    Child: Text(
-                      ‘My Uploads (${uploads.length})’,
-                      Style: GoogleFonts.poppins(
+                    child: Text(
+                      'My Uploads (${uploads.length})',
+                      style: GoogleFonts.poppins(
                         fontWeight: FontWeight.bold,
                         fontSize: 17,
                       ),
@@ -1206,93 +1022,82 @@ Return StreamBuilder<QuerySnapshot>(
                     onPressed: _clearUploadHistory,
                     icon: const Icon(
                       Icons.delete_outline,
-                      Size: 18,
+                      size: 18,
                     ),
-                    Label: const Text(‘Clear’),
+                    label: const Text('Clear'),
                   ),
                 ],
               ),
             ),
             Expanded(
-              Child: ListView.builder(
-                Padding: const EdgeInsets.only(
-                  Bottom: 90,
+              child: ListView.builder(
+                padding: const EdgeInsets.only(
+                  bottom: 90,
                 ),
                 itemCount: uploads.length,
                 itemBuilder: (context, index) {
                   final _MyUploadItem item =
                       uploads[index];
-
                   final QueryDocumentSnapshot doc =
                       item.document;
-
                   final dynamic rawData =
                       doc.data();
-
                   if (rawData is! Map) {
                     return const SizedBox.shrink();
                   }
-
-                  Final Map<String, dynamic> data =
+                  final Map<String, dynamic> data =
                       Map<String, dynamic>.from(
                     rawData,
                   );
-
-                  Final String status =
+                  final String status =
                       _getUploadStatus(
-                    Doc,
+                    doc,
                     isPendingCollection:
                         item.isPendingCollection,
                   );
-
-                  Final Color statusColor =
+                  final Color statusColor =
                       _getStatusColor(status);
-
-                  Final String title =
-                      Data[‘title’]?.toString() ??
-                          Data[‘fileName’]?.toString() ??
-                          ‘Uploaded File’;
-
-                  Final String fileUrl =
-                      Data[‘fileUrl’]?.toString() ??
-                          Data[‘url’]?.toString() ??
-                          ‘’;
-
-                  Final String course =
-                      Data[‘course’]?.toString() ??
-                          ‘Unknown Subject’;
-
-                  Final String examType =
-                      Data[‘examType’]?.toString() ??
-                          ‘Resource’;
-
-                  Return Card(
-                    Margin: const EdgeInsets.symmetric(
-                      Horizontal: 12,
-                      Vertical: 6,
+                  final String title =
+                      data['title']?.toString() ??
+                          data['fileName']?.toString() ??
+                          'Uploaded File';
+                  final String fileUrl =
+                      data['fileUrl']?.toString() ??
+                          data['url']?.toString() ??
+                          '';
+                  final String course =
+                      data['course']?.toString() ??
+                          'Unknown Subject';
+                  final String examType =
+                      data['examType']?.toString() ??
+                          'Resource';
+                  return Card(
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
                     ),
-                    Elevation: 2,
-                    Shape: RoundedRectangleBorder(
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
                       borderRadius:
                           BorderRadius.circular(14),
                     ),
-                    Child: Padding(
-                      Padding:
-                          Const EdgeInsets.all(12),
-                      Child: Column(
-                        Children: [
+                    child: Padding(
+                      padding:
+                          const EdgeInsets.all(12),
+                      child: Column(
+                        children: [
                           Row(
                             crossAxisAlignment:
                                 CrossAxisAlignment.start,
-                            Children: [
+                            children: [
                               Container(
-                                Padding:
-                                    Const EdgeInsets.all(
+                                padding:
+                                    const EdgeInsets.all(
                                   10,
                                 ),
-                                Decoration:
+                                decoration:
                                     BoxDecoration(
-                                  Color: statusColor
+                                  color: statusColor
                                       .withOpacity(
                                     0.12,
                                   ),
@@ -1302,31 +1107,31 @@ Return StreamBuilder<QuerySnapshot>(
                                     12,
                                   ),
                                 ),
-                                Child: Icon(
+                                child: Icon(
                                   _getFileIcon(
                                     fileUrl,
                                   ),
-                                  Color:
+                                  color:
                                       statusColor,
                                   size: 28,
                                 ),
                               ),
-                              Const SizedBox(
-                                Width: 12,
+                              const SizedBox(
+                                width: 12,
                               ),
                               Expanded(
-                                Child: Column(
+                                child: Column(
                                   crossAxisAlignment:
                                       CrossAxisAlignment
                                           .start,
-                                  Children: [
+                                  children: [
                                     Text(
-                                      Title,
+                                      title,
                                       maxLines: 2,
                                       overflow:
                                           TextOverflow
                                               .ellipsis,
-                                      Style:
+                                      style:
                                           GoogleFonts
                                               .poppins(
                                         fontWeight:
@@ -1335,16 +1140,16 @@ Return StreamBuilder<QuerySnapshot>(
                                         fontSize: 15,
                                       ),
                                     ),
-                                    Const SizedBox(
-                                      Height: 5,
+                                    const SizedBox(
+                                      height: 5,
                                     ),
                                     Text(
-                                      ‘$course • $examType’,
+                                      '$course • $examType',
                                       maxLines: 2,
                                       overflow:
                                           TextOverflow
                                               .ellipsis,
-                                      Style:
+                                      style:
                                           GoogleFonts
                                               .poppins(
                                         fontSize: 12,
@@ -1357,23 +1162,22 @@ Return StreamBuilder<QuerySnapshot>(
                               ),
                             ],
                           ),
-                          Const SizedBox(
-                            Height: 10,
+                          const SizedBox(
+                            height: 10,
                           ),
-
                           // STATUS TAG
                           Row(
-                            Children: [
+                            children: [
                               Container(
-                                Padding:
-                                    Const EdgeInsets
+                                padding:
+                                    const EdgeInsets
                                         .symmetric(
-                                  Horizontal: 10,
-                                  Vertical: 5,
+                                  horizontal: 10,
+                                  vertical: 5,
                                 ),
-                                Decoration:
+                                decoration:
                                     BoxDecoration(
-                                  Color: statusColor
+                                  color: statusColor
                                       .withOpacity(
                                     0.12,
                                   ),
@@ -1382,34 +1186,34 @@ Return StreamBuilder<QuerySnapshot>(
                                           .circular(
                                     20,
                                   ),
-                                  Border: Border.all(
-                                    Color: statusColor
+                                  border: Border.all(
+                                    color: statusColor
                                         .withOpacity(
                                       0.35,
                                     ),
                                   ),
                                 ),
-                                Child: Row(
+                                child: Row(
                                   mainAxisSize:
                                       MainAxisSize.min,
-                                  Children: [
+                                  children: [
                                     Icon(
                                       _getStatusIcon(
-                                        Status,
+                                        status,
                                       ),
-                                      Size: 15,
-                                      Color:
+                                      size: 15,
+                                      color:
                                           statusColor,
                                     ),
-                                    Const SizedBox(
-                                      Width: 5,
+                                    const SizedBox(
+                                      width: 5,
                                     ),
                                     Text(
-                                      Status,
-                                      Style:
+                                      status,
+                                      style:
                                           GoogleFonts
                                               .poppins(
-                                        Color:
+                                        color:
                                             statusColor,
                                         fontSize: 11,
                                         fontWeight:
@@ -1420,49 +1224,47 @@ Return StreamBuilder<QuerySnapshot>(
                                   ],
                                 ),
                               ),
-                              Const Spacer(),
-                              If (fileUrl.isNotEmpty)
+                              const Spacer(),
+                              if (fileUrl.isNotEmpty)
                                 IconButton(
-                                  Tooltip:
-                                      ‘Open file’,
-                                  Icon: Icon(
+                                  tooltip:
+                                      'Open file',
+                                  icon: Icon(
                                     Icons
                                         .open_in_new,
-                                    Color:
+                                    color:
                                         primaryGreen,
                                   ),
                                   onPressed: () =>
                                       _openResource(
-                                    Doc.id,
+                                    doc.id,
                                     fileUrl,
                                     title,
                                   ),
                                 ),
                             ],
                           ),
-
-                          Const Divider(
-                            Height: 18,
+                          const Divider(
+                            height: 18,
                           ),
-
                           Row(
-                            Children: [
-                              Const Icon(
+                            children: [
+                              const Icon(
                                 Icons
                                     .calendar_today,
-                                Size: 13,
-                                Color: Colors.grey,
+                                size: 13,
+                                color: Colors.grey,
                               ),
-                              Const SizedBox(
-                                Width: 5,
+                              const SizedBox(
+                                width: 5,
                               ),
                               Expanded(
-                                Child: Text(
+                                child: Text(
                                   _formatDate(
-                                    Data[
-                                        ‘uploadedAt’],
+                                    data[
+                                        'uploadedAt'],
                                   ),
-                                  Style:
+                                  style:
                                       GoogleFonts
                                           .poppins(
                                     fontSize: 10,
@@ -1471,23 +1273,23 @@ Return StreamBuilder<QuerySnapshot>(
                                   ),
                                 ),
                               ),
-                              If (data[
-                                      ‘fileSize’] !=
-                                  Null) …[
-                                Const Icon(
+                              if (data[
+                                      'fileSize'] !=
+                                  null) ...[
+                                const Icon(
                                   Icons.data_object,
-                                  Size: 13,
-                                  Color: Colors.grey,
+                                  size: 13,
+                                  color: Colors.grey,
                                 ),
-                                Const SizedBox(
-                                  Width: 5,
+                                const SizedBox(
+                                  width: 5,
                                 ),
                                 Text(
                                   _formatBytes(
-                                    Data[
-                                        ‘fileSize’],
+                                    data[
+                                        'fileSize'],
                                   ),
-                                  Style:
+                                  style:
                                       GoogleFonts
                                           .poppins(
                                     fontSize: 10,
@@ -1508,84 +1310,73 @@ Return StreamBuilder<QuerySnapshot>(
           ],
         );
       },
-);
+    );
   }
-
   // ---------------------------------------------------------------------------
   // MAIN BUILD
   // ---------------------------------------------------------------------------
-
   @override
   Widget build(BuildContext context) {
-Const Color primaryGreen =
+    const Color primaryGreen =
         Color(0xFF00C896);
-
-Const Color secondaryBlue =
+    const Color secondaryBlue =
         Color(0xFF3B82F6);
-
-Final bool isDark =
-        _themeMode == ‘dark’;
-
-Return StreamBuilder<DocumentSnapshot>(
-      Stream: _firestore
-          .collection(‘settings’)
-          .doc(‘app’)
+    final bool isDark =
+        _themeMode == 'dark';
+    return StreamBuilder<DocumentSnapshot>(
+      stream: _firestore
+          .collection('settings')
+          .doc('app')
           .snapshots(),
-      Builder: (
-        Context,
+      builder: (
+        context,
         settingsSnap,
       ) {
         List<String> liveSubjects = [
-          ‘All’,
-          ‘Maths’,
-          ‘Physics’,
-          ‘Chemistry’,
-          ‘Biology’,
-          ‘Favorites’,
-          ‘Recent’,
-          ‘My Uploads’,
+          'All',
+          'Maths',
+          'Physics',
+          'Chemistry',
+          'Biology',
+          'Favorites',
+          'Recent',
+          'My Uploads',
         ];
-
-        If (settingsSnap.hasData &&
+        if (settingsSnap.hasData &&
             settingsSnap.data!.exists) {
           final dynamic rawSettings =
               settingsSnap.data!.data();
-
           if (rawSettings is Map) {
             final dynamic rawSubjects =
-                rawSettings[‘subjects’];
-
+                rawSettings['subjects'];
             if (rawSubjects is List) {
               final List<String> dbSubjects =
                   rawSubjects
                       .map(
-                        € => e.toString(),
+                        (e) => e.toString(),
                       )
                       .where(
-                        € => e.isNotEmpty,
+                        (e) => e.isNotEmpty,
                       )
                       .toList();
-
               liveSubjects = [
-                ‘All’,
-                …dbSubjects,
-                ‘Favorites’,
-                ‘Recent’,
-                ‘My Uploads’,
+                'All',
+                ...dbSubjects,
+                'Favorites',
+                'Recent',
+                'My Uploads',
               ];
             }
           }
         }
-
-        If (!liveSubjects.contains(
+        if (!liveSubjects.contains(
           selectedCourse,
         )) {
-          selectedCourse = ‘All’;
+          selectedCourse = 'All';
         }
-
-        Return Theme(
-          Data: ThemeData(
-            Brightness: isDark
+        return Theme(
+          data: ThemeData(
+            brightness: isDark
                 ? Brightness.dark
                 : Brightness.light,
             primaryColor: primaryGreen,
@@ -1604,13 +1395,13 @@ Return StreamBuilder<DocumentSnapshot>(
                   : Brightness.light,
             ),
           ),
-          Child: Scaffold(
+          child: Scaffold(
             appBar: AppBar(
               title: GestureDetector(
                 onTap: _handleHeaderTap,
                 child: Text(
-                  ‘ExamHook’,
-                  Style: GoogleFonts.poppins(
+                  'ExamHook',
+                  style: GoogleFonts.poppins(
                     fontWeight:
                         FontWeight.bold,
                   ),
@@ -1621,19 +1412,17 @@ Return StreamBuilder<DocumentSnapshot>(
               actions: [
                 // AI BUTTON REMAINS
                 IconButton(
-                  Tooltip: ‘Ask AI’,
-                  Icon: const Icon(
+                  tooltip: 'Ask AI',
+                  icon: const Icon(
                     Icons.smart_toy,
                   ),
                   onPressed:
                       _showGeminiChat,
                 ),
-
                 // UPLOAD APPBAR BUTTON REMOVED
-
                 IconButton(
-                  Tooltip: ‘Request Notes’,
-                  Icon: const Icon(
+                  tooltip: 'Request Notes',
+                  icon: const Icon(
                     Icons.mail_outline,
                   ),
                   onPressed:
@@ -1641,41 +1430,39 @@ Return StreamBuilder<DocumentSnapshot>(
                 ),
               ],
             ),
-
             // -----------------------------------------------------------------
             // DRAWER
             // -----------------------------------------------------------------
-
-            Drawer: Drawer(
-              Child: Column(
-                Children: [
+            drawer: Drawer(
+              child: Column(
+                children: [
                   DrawerHeader(
-                    Decoration:
-                        Const BoxDecoration(
-                      Color: Color(0xFF1E293B),
+                    decoration:
+                        const BoxDecoration(
+                      color: Color(0xFF1E293B),
                     ),
-                    Child: Column(
+                    child: Column(
                       mainAxisAlignment:
                           MainAxisAlignment.center,
-                      Children: [
+                      children: [
                         GestureDetector(
                           onTap:
                               _handleHeaderTap,
-                          Child:
-                              Const Icon(
+                          child:
+                              const Icon(
                             Icons.school,
-                            Size: 60,
-                            Color: Colors.white,
+                            size: 60,
+                            color: Colors.white,
                           ),
                         ),
-                        Const SizedBox(
-                          Height: 10,
+                        const SizedBox(
+                          height: 10,
                         ),
                         Text(
-                          ‘ExamHook’,
-                          Style:
+                          'ExamHook',
+                          style:
                               GoogleFonts.poppins(
-                            Color:
+                            color:
                                 Colors.white,
                             fontSize: 22,
                             fontWeight:
@@ -1684,10 +1471,10 @@ Return StreamBuilder<DocumentSnapshot>(
                           ),
                         ),
                         Text(
-                          ‘AI + Resources’,
-                          Style:
+                          'AI + Resources',
+                          style:
                               GoogleFonts.poppins(
-                            Color:
+                            color:
                                 Colors.white70,
                             fontSize: 14,
                           ),
@@ -1695,54 +1482,53 @@ Return StreamBuilder<DocumentSnapshot>(
                       ],
                     ),
                   ),
-
                   Padding(
-                    Padding:
-                        Const EdgeInsets.symmetric(
-                      Horizontal: 16,
-                      Vertical: 8,
+                    padding:
+                        const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
                     ),
-                    Child: Column(
+                    child: Column(
                       crossAxisAlignment:
                           CrossAxisAlignment
                               .start,
-                      Children: [
+                      children: [
                         Text(
-                          ‘Theme’,
-                          Style:
+                          'Theme',
+                          style:
                               GoogleFonts.poppins(
                             fontWeight:
                                 FontWeight.bold,
                           ),
                         ),
-                        Const SizedBox(
-                          Height: 8,
+                        const SizedBox(
+                          height: 8,
                         ),
                         SegmentedButton<String>(
-                          Segments: const [
+                          segments: const [
                             ButtonSegment(
-                              Value: ‘light’,
-                              Label:
-                                  Text(‘Light’),
-                              Icon: Icon(
+                              value: 'light',
+                              label:
+                                  Text('Light'),
+                              icon: Icon(
                                 Icons.light_mode,
                               ),
                             ),
                             ButtonSegment(
-                              Value: ‘dark’,
-                              Label:
-                                  Text(‘Dark’),
-                              Icon: Icon(
+                              value: 'dark',
+                              label:
+                                  Text('Dark'),
+                              icon: Icon(
                                 Icons.dark_mode,
                               ),
                             ),
                           ],
-                          Selected: {
+                          selected: {
                             _themeMode,
                           },
                           onSelectionChanged:
                               (newSelection) {
-                            If (newSelection
+                            if (newSelection
                                 .isNotEmpty) {
                               _saveTheme(
                                 newSelection
@@ -1754,122 +1540,111 @@ Return StreamBuilder<DocumentSnapshot>(
                       ],
                     ),
                   ),
-
-                  Const Divider(),
-
+                  const Divider(),
                   // AI
                   ListTile(
-                    Leading: const Icon(
+                    leading: const Icon(
                       Icons.smart_toy,
-                      Color:
+                      color:
                           primaryGreen,
                     ),
-                    Title: Text(
-                      ‘Ask ExamHook AI’,
-                      Style:
+                    title: Text(
+                      'Ask ExamHook AI',
+                      style:
                           GoogleFonts.poppins(),
                     ),
                     onTap: () {
                       Navigator.pop(
-                        Context,
+                        context,
                       );
                       _showGeminiChat();
                     },
                   ),
-
                   // FLASHCARDS
                   ListTile(
-                    Leading: const Icon(
+                    leading: const Icon(
                       Icons.quiz,
-                      Color:
+                      color:
                           primaryGreen,
                     ),
-                    Title: Text(
-                      ‘AI Flashcards’,
-                      Style:
+                    title: Text(
+                      'AI Flashcards',
+                      style:
                           GoogleFonts.poppins(),
                     ),
                     onTap: () {
                       Navigator.pop(
-                        Context,
+                        context,
                       );
                       _showFlashcards(
-                        ‘General Knowledge’,
+                        'General Knowledge',
                       );
                     },
                   ),
-
                   // DRAWER UPLOAD OPTION REMOVED
-
                   Expanded(
-                    Child:
+                    child:
                         ListView.builder(
                       itemCount:
                           liveSubjects.length,
                       itemBuilder:
                           (context, index) {
-                        Final String subject =
+                        final String subject =
                             liveSubjects[
                                 index];
-
                         IconData icon =
                             Icons.book;
-
-                        If (subject ==
-                            ‘Favorites’) {
-                          Icon =
+                        if (subject ==
+                            'Favorites') {
+                          icon =
                               Icons.bookmark;
                         }
-
-                        If (subject ==
-                            ‘Recent’) {
-                          Icon =
+                        if (subject ==
+                            'Recent') {
+                          icon =
                               Icons.history;
                         }
-
-                        If (subject ==
-                            ‘My Uploads’) {
-                          Icon =
+                        if (subject ==
+                            'My Uploads') {
+                          icon =
                               Icons.cloud_upload;
                         }
-
-                        Final bool isNormalSubject =
-                            Subject !=
-                                ‘All’ &&
-                            Subject !=
-                                ‘Favorites’ &&
-                            Subject !=
-                                ‘Recent’ &&
-                            Subject !=
-                                ‘My Uploads’;
-
-                        Return ListTile(
-                          Leading: Icon(
-                            Icon,
-                            Color:
+                        final bool isNormalSubject =
+                            subject !=
+                                'All' &&
+                            subject !=
+                                'Favorites' &&
+                            subject !=
+                                'Recent' &&
+                            subject !=
+                                'My Uploads';
+                        return ListTile(
+                          leading: Icon(
+                            icon,
+                            color:
                                 primaryGreen,
                           ),
-                          Title: Text(
-                            Subject,
-                            Style:
+                          title: Text(
+                            subject,
+                            style:
                                 GoogleFonts.poppins(),
                           ),
-                          Trailing:
+                          trailing:
                               isNormalSubject
                                   ? IconButton(
-                                      Icon:
-                                          Const Icon(
+                                      icon:
+                                          const Icon(
                                         Icons.quiz,
-                                        Size: 18,
+                                        size: 18,
                                       ),
                                       onPressed:
                                           () =>
                                               _showFlashcards(
-                                        Subject,
+                                        subject,
                                       ),
                                     )
                                   : null,
-                          Selected:
+                          selected:
                               selectedCourse ==
                                   subject,
                           selectedTileColor:
@@ -1882,25 +1657,23 @@ Return StreamBuilder<DocumentSnapshot>(
                               selectedCourse =
                                   subject;
                             });
-
                             Navigator.pop(
-                              Context,
+                              context,
                             );
                           },
                         );
                       },
                     ),
                   ),
-
                   ListTile(
-                    Leading: const Icon(
+                    leading: const Icon(
                       Icons.description,
-                      Color:
+                      color:
                           primaryGreen,
                     ),
-                    Title: Text(
-                      ‘Terms & Conditions’,
-                      Style:
+                    title: Text(
+                      'Terms & Conditions',
+                      style:
                           GoogleFonts.poppins(),
                     ),
                     onTap:
@@ -1909,19 +1682,17 @@ Return StreamBuilder<DocumentSnapshot>(
                 ],
               ),
             ),
-
             // -----------------------------------------------------------------
-            // FAB – ONLY UPLOAD METHOD
+            // FAB - ONLY UPLOAD METHOD
             // -----------------------------------------------------------------
-
             floatingActionButton:
                 FloatingActionButton.extended(
               onPressed: () {
                 Navigator.push(
-                  Context,
+                  context,
                   MaterialPageRoute(
-                    Builder: (_) =>
-                        Const StudentUploadScreen(),
+                    builder: (_) =>
+                        const StudentUploadScreen(),
                   ),
                 );
               },
@@ -1930,39 +1701,37 @@ Return StreamBuilder<DocumentSnapshot>(
               icon: const Icon(
                 Icons.add,
               ),
-              Label: Text(
-                ‘Upload’,
-                Style:
+              label: Text(
+                'Upload',
+                style:
                     GoogleFonts.poppins(
                   fontWeight:
                       FontWeight.w600,
                 ),
               ),
             ),
-
             // -----------------------------------------------------------------
             // BODY
             // -----------------------------------------------------------------
-
-            Body: Column(
-              Children: [
+            body: Column(
+              children: [
                 Padding(
-                  Padding:
-                      Const EdgeInsets.all(
+                  padding:
+                      const EdgeInsets.all(
                     12,
                   ),
-                  Child: TextField(
-                    Controller:
+                  child: TextField(
+                    controller:
                         _searchController,
-                    Decoration:
+                    decoration:
                         InputDecoration(
                       hintText:
-                          ‘Search resources…’,
+                          'Search resources...',
                       prefixIcon:
                           const Icon(
                         Icons.search,
                       ),
-                      Border:
+                      border:
                           OutlineInputBorder(
                         borderRadius:
                             BorderRadius
@@ -1970,7 +1739,7 @@ Return StreamBuilder<DocumentSnapshot>(
                           12,
                         ),
                       ),
-                      Filled: true,
+                      filled: true,
                       fillColor: isDark
                           ? Colors.grey
                               .shade800
@@ -1987,25 +1756,24 @@ Return StreamBuilder<DocumentSnapshot>(
                     },
                   ),
                 ),
-
-                If (selectedCourse !=
-                    ‘My Uploads’)
+                if (selectedCourse !=
+                    'My Uploads')
                   Padding(
-                    Padding:
-                        Const EdgeInsets
+                    padding:
+                        const EdgeInsets
                             .symmetric(
-                      Horizontal: 12,
+                      horizontal: 12,
                     ),
-                    Child:
+                    child:
                         DropdownButtonFormField<
                             String>(
-                      Value:
+                      value:
                           selectedCourse,
                       decoration:
                           InputDecoration(
                         labelText:
-                            ‘Subject’,
-                        Border:
+                            'Subject',
+                        border:
                             OutlineInputBorder(
                           borderRadius:
                               BorderRadius
@@ -2014,26 +1782,25 @@ Return StreamBuilder<DocumentSnapshot>(
                           ),
                         ),
                       ),
-                      Items: liveSubjects
+                      items: liveSubjects
                           .map(
                             (
-                              E,
+                              e,
                             ) =>
                                 DropdownMenuItem<
                                     String>(
-                              Value: e,
-                              Child:
-                                  Text€,
+                              value: e,
+                              child:
+                                  Text(e),
                             ),
                           )
                           .toList(),
                       onChanged:
                           (val) {
-                        If (val ==
-                            Null) {
-                          Return;
+                        if (val ==
+                            null) {
+                          return;
                         }
-
                         setState(() {
                           selectedCourse =
                               val;
@@ -2041,55 +1808,51 @@ Return StreamBuilder<DocumentSnapshot>(
                       },
                     ),
                   ),
-
-                Const SizedBox(
-                  Height: 10,
+                const SizedBox(
+                  height: 10,
                 ),
-
                 Expanded(
-                  Child:
+                  child:
                       StreamBuilder<
                           QuerySnapshot>(
-                    Stream: _firestore
+                    stream: _firestore
                         .collection(
-                            ‘resources’)
+                            'resources')
                         .orderBy(
-                          ‘uploadedAt’,
-                          Descending:
-                              True,
+                          'uploadedAt',
+                          descending:
+                              true,
                         )
                         .snapshots(),
-                    Builder: (
-                      Context,
-                      Snapshot,
+                    builder: (
+                      context,
+                      snapshot,
                     ) {
-                      If (snapshot
+                      if (snapshot
                               .connectionState ==
                           ConnectionState
                               .waiting) {
-                        Return const Center(
-                          Child:
+                        return const Center(
+                          child:
                               CircularProgressIndicator(),
                         );
                       }
-
-                      If (snapshot.hasError) {
-                        Return Center(
-                          Child:
+                      if (snapshot.hasError) {
+                        return Center(
+                          child:
                               Padding(
-                            Padding:
-                                Const EdgeInsets
+                            padding:
+                                const EdgeInsets
                                     .all(
                               20,
                             ),
-                            Child: Text(
-                              ‘Error: ${snapshot.error}’,
+                            child: Text(
+                              'Error: ${snapshot.error}',
                             ),
                           ),
                         );
                       }
-
-                      Final List<
+                      final List<
                               QueryDocumentSnapshot>
                           allApprovedDocs =
                           snapshot.hasData
@@ -2097,33 +1860,28 @@ Return StreamBuilder<DocumentSnapshot>(
                                   .data!
                                   .docs
                               : [];
-
                       // -------------------------------------------------------
                       // MY UPLOADS
                       // -------------------------------------------------------
-
-                      If (selectedCourse ==
-                          ‘My Uploads’) {
-                        Return _buildMyUploadsView(
+                      if (selectedCourse ==
+                          'My Uploads') {
+                        return _buildMyUploadsView(
                           allApprovedDocs,
                           primaryGreen,
                         );
                       }
-
                       // -------------------------------------------------------
                       // NORMAL RESOURCES
                       // -------------------------------------------------------
-
                       List<
                               QueryDocumentSnapshot>
-                          Docs =
+                          docs =
                           List.from(
                         allApprovedDocs,
                       );
-
-                      If (selectedCourse ==
-                          ‘Favorites’) {
-                        Docs = docs
+                      if (selectedCourse ==
+                          'Favorites') {
+                        docs = docs
                             .where(
                               (d) =>
                                   favoriteDocs
@@ -2133,8 +1891,8 @@ Return StreamBuilder<DocumentSnapshot>(
                             )
                             .toList();
                       } else if (selectedCourse ==
-                          ‘Recent’) {
-                        Docs = docs
+                          'Recent') {
+                        docs = docs
                             .where(
                               (d) =>
                                   recentlyViewed
@@ -2144,71 +1902,62 @@ Return StreamBuilder<DocumentSnapshot>(
                             )
                             .toList();
                       } else if (selectedCourse !=
-                          ‘All’) {
-                        Docs = docs
+                          'All') {
+                        docs = docs
                             .where(
                               (d) {
-                                Final dynamic raw =
+                                final dynamic raw =
                                     d.data();
-
                                 if (raw is! Map) {
                                   return false;
                                 }
-
-                                Return raw[
-                                            ‘course’]
+                                return raw[
+                                            'course']
                                         ?.toString() ==
                                     selectedCourse;
                               },
                             )
                             .toList();
                       }
-
-                      If (searchQuery
+                      if (searchQuery
                           .isNotEmpty) {
-                        Docs = docs
+                        docs = docs
                             .where(
                               (d) {
-                                Final dynamic raw =
+                                final dynamic raw =
                                     d.data();
-
                                 if (raw is! Map) {
                                   return false;
                                 }
-
-                                Final Map<String,
-                                        Dynamic>
-                                    Data =
+                                final Map<String,
+                                        dynamic>
+                                    data =
                                     Map<String,
-                                        Dynamic>.from(
-                                  Raw,
+                                        dynamic>.from(
+                                  raw,
                                 );
-
-                                Final String title =
-                                    Data[
-                                                ‘title’]
+                                final String title =
+                                    data[
+                                                'title']
                                             ?.toString()
                                             .toLowerCase() ??
-                                        ‘’;
-
-                                Final String course =
-                                    Data[
-                                                ‘course’]
+                                        '';
+                                final String course =
+                                    data[
+                                                'course']
                                             ?.toString()
                                             .toLowerCase() ??
-                                        ‘’;
-
-                                Final String fileName =
-                                    Data[
-                                                ‘fileName’]
+                                        '';
+                                final String fileName =
+                                    data[
+                                                'fileName']
                                             ?.toString()
                                             .toLowerCase() ??
-                                        ‘’;
-
-                                Return title.contains(
+                                        '';
+                                return title.contains(
                                       searchQuery,
                                     ) ||
-                                    Course.contains(
+                                    course.contains(
                                       searchQuery,
                                     ) ||
                                     fileName.contains(
@@ -2218,38 +1967,37 @@ Return StreamBuilder<DocumentSnapshot>(
                             )
                             .toList();
                       }
-
-                      If (docs.isEmpty) {
-                        Return Center(
-                          Child:
+                      if (docs.isEmpty) {
+                        return Center(
+                          child:
                               Padding(
-                            Padding:
-                                Const EdgeInsets
+                            padding:
+                                const EdgeInsets
                                     .all(
                               24,
                             ),
-                            Child:
+                            child:
                                 Column(
                               mainAxisAlignment:
                                   MainAxisAlignment
                                       .center,
-                              Children: [
+                              children: [
                                 Icon(
                                   Icons
                                       .folder_open,
-                                  Size: 100,
-                                  Color:
+                                  size: 100,
+                                  color:
                                       primaryGreen
                                           .withOpacity(
                                     0.5,
                                   ),
                                 ),
-                                Const SizedBox(
-                                  Height: 20,
+                                const SizedBox(
+                                  height: 20,
                                 ),
                                 Text(
-                                  ‘No resources yet’,
-                                  Style:
+                                  'No resources yet',
+                                  style:
                                       GoogleFonts
                                           .poppins(
                                     fontSize:
@@ -2259,41 +2007,41 @@ Return StreamBuilder<DocumentSnapshot>(
                                             .bold,
                                   ),
                                 ),
-                                Const SizedBox(
-                                  Height: 8,
+                                const SizedBox(
+                                  height: 8,
                                 ),
                                 Text(
-                                  ‘Be the first to upload or ask AI’,
+                                  'Be the first to upload or ask AI',
                                   textAlign:
                                       TextAlign
                                           .center,
-                                  Style:
+                                  style:
                                       GoogleFonts
                                           .poppins(
                                     fontSize:
                                         14,
-                                    Color:
+                                    color:
                                         Colors
                                             .grey,
                                   ),
                                 ),
-                                Const SizedBox(
-                                  Height: 20,
+                                const SizedBox(
+                                  height: 20,
                                 ),
                                 ElevatedButton
                                     .icon(
                                   onPressed:
                                       _showGeminiChat,
-                                  Icon:
-                                      Const Icon(
+                                  icon:
+                                      const Icon(
                                     Icons
                                         .smart_toy,
                                   ),
-                                  Label:
-                                      Const Text(
-                                    ‘Ask AI’,
+                                  label:
+                                      const Text(
+                                    'Ask AI',
                                   ),
-                                  Style:
+                                  style:
                                       ElevatedButton
                                           .styleFrom(
                                     backgroundColor:
@@ -2301,7 +2049,7 @@ Return StreamBuilder<DocumentSnapshot>(
                                     foregroundColor:
                                         Colors
                                             .white,
-                                    Shape:
+                                    shape:
                                         RoundedRectangleBorder(
                                       borderRadius:
                                           BorderRadius
@@ -2316,98 +2064,83 @@ Return StreamBuilder<DocumentSnapshot>(
                           ),
                         );
                       }
-
                       // -------------------------------------------------------
                       // RESOURCE LIST
                       // -------------------------------------------------------
-
-                      Return ListView.builder(
-                        Padding:
-                            Const EdgeInsets
+                      return ListView.builder(
+                        padding:
+                            const EdgeInsets
                                 .only(
-                          Bottom: 90,
+                          bottom: 90,
                         ),
                         itemCount:
                             docs.length,
                         itemBuilder:
                             (context, index) {
-                          Final QueryDocumentSnapshot
-                              Doc =
-                              Docs[index];
-
-                          Final dynamic raw =
-                              Doc.data();
-
-                          If (raw is! Map) {
-                            Return const SizedBox
+                          final QueryDocumentSnapshot
+                              doc =
+                              docs[index];
+                          final dynamic raw =
+                              doc.data();
+                          if (raw is! Map) {
+                            return const SizedBox
                                 .shrink();
                           }
-
-                          Final Map<String,
-                                  Dynamic>
-                              Data =
+                          final Map<String,
+                                  dynamic>
+                              data =
                               Map<String,
-                                  Dynamic>.from(
-                            Raw,
+                                  dynamic>.from(
+                            raw,
                           );
-
-                          Final String docId =
-                              Doc.id;
-
-                          Final String title =
-                              Data[‘title’]
+                          final String docId =
+                              doc.id;
+                          final String title =
+                              data['title']
                                       ?.toString() ??
-                                  ‘No Title’;
-
-                          Final String fileUrl =
-                              Data[‘fileUrl’]
+                                  'No Title';
+                          final String fileUrl =
+                              data['fileUrl']
                                       ?.toString() ??
-                                  ‘’;
-
-                          Final String course =
-                              Data[‘course’]
+                                  '';
+                          final String course =
+                              data['course']
                                       ?.toString() ??
-                                  ‘’;
-
-                          Final String examType =
-                              Data[‘examType’]
+                                  '';
+                          final String examType =
+                              data['examType']
                                       ?.toString() ??
-                                  ‘’;
-
-                          Final bool isLiked =
+                                  '';
+                          final bool isLiked =
                               likedDocs
                                   .contains(
                             docId,
                           );
-
-                          Final bool isRated =
+                          final bool isRated =
                               ratedDocs
                                   .contains(
                             docId,
                           );
-
-                          Final bool isFav =
+                          final bool isFav =
                               favoriteDocs
                                   .contains(
                             docId,
                           );
-
-                          Final Color cardColor =
+                          final Color cardColor =
                               _getCardColor(
-                            Course,
+                            course,
                           );
-
-                          Return Card(
-                            Margin:
-                                Const EdgeInsets
+                          return Card(
+                            margin:
+                                const EdgeInsets
                                     .symmetric(
-                              Horizontal:
+                              horizontal:
                                   12,
-                              Vertical:
+                              vertical:
                                   8,
                             ),
-                            Elevation: 4,
-                            Shape:
+                            elevation: 4,
+                            shape:
                                 RoundedRectangleBorder(
                               borderRadius:
                                   BorderRadius
@@ -2415,18 +2148,18 @@ Return StreamBuilder<DocumentSnapshot>(
                                 20,
                               ),
                             ),
-                            Child:
+                            child:
                                 Container(
-                              Decoration:
+                              decoration:
                                   BoxDecoration(
                                 borderRadius:
                                     BorderRadius
                                         .circular(
                                   20,
                                 ),
-                                Gradient:
+                                gradient:
                                     LinearGradient(
-                                  Colors: [
+                                  colors: [
                                     cardColor
                                         .withOpacity(
                                       0.1,
@@ -2436,48 +2169,48 @@ Return StreamBuilder<DocumentSnapshot>(
                                       0.02,
                                     ),
                                   ],
-                                  Begin:
+                                  begin:
                                       Alignment
                                           .topLeft,
-                                  End:
+                                  end:
                                       Alignment
                                           .bottomRight,
                                 ),
-                                Border:
+                                border:
                                     Border.all(
-                                  Color: cardColor
+                                  color: cardColor
                                       .withOpacity(
                                     0.3,
                                   ),
                                 ),
                               ),
-                              Child:
+                              child:
                                   Padding(
-                                Padding:
-                                    Const EdgeInsets
+                                padding:
+                                    const EdgeInsets
                                         .all(
                                   14,
                                 ),
-                                Child:
+                                child:
                                     Column(
                                   crossAxisAlignment:
                                       CrossAxisAlignment
                                           .start,
-                                  Children: [
+                                  children: [
                                     Row(
                                       crossAxisAlignment:
                                           CrossAxisAlignment
                                               .start,
-                                      Children: [
+                                      children: [
                                         Container(
-                                          Padding:
-                                              Const EdgeInsets
+                                          padding:
+                                              const EdgeInsets
                                                   .all(
                                             10,
                                           ),
-                                          Decoration:
+                                          decoration:
                                               BoxDecoration(
-                                            Color: cardColor
+                                            color: cardColor
                                                 .withOpacity(
                                               0.2,
                                             ),
@@ -2487,31 +2220,31 @@ Return StreamBuilder<DocumentSnapshot>(
                                               12,
                                             ),
                                           ),
-                                          Child:
+                                          child:
                                               Icon(
                                             _getFileIcon(
                                               fileUrl,
                                             ),
-                                            Color:
+                                            color:
                                                 cardColor,
                                             size:
                                                 28,
                                           ),
                                         ),
-                                        Const SizedBox(
-                                          Width:
+                                        const SizedBox(
+                                          width:
                                               12,
                                         ),
                                         Expanded(
-                                          Child:
+                                          child:
                                               Column(
                                             crossAxisAlignment:
                                                 CrossAxisAlignment
                                                     .start,
-                                            Children: [
+                                            children: [
                                               Text(
-                                                Title,
-                                                Style:
+                                                title,
+                                                style:
                                                     GoogleFonts.poppins(
                                                   fontWeight:
                                                       FontWeight.w600,
@@ -2519,35 +2252,35 @@ Return StreamBuilder<DocumentSnapshot>(
                                                       16,
                                                 ),
                                               ),
-                                              Const SizedBox(
-                                                Height:
+                                              const SizedBox(
+                                                height:
                                                     4,
                                               ),
                                               Container(
-                                                Padding:
-                                                    Const EdgeInsets.symmetric(
-                                                  Horizontal:
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal:
                                                       8,
-                                                  Vertical:
+                                                  vertical:
                                                       2,
                                                 ),
-                                                Decoration:
+                                                decoration:
                                                     BoxDecoration(
-                                                  Color:
+                                                  color:
                                                       cardColor,
                                                   borderRadius:
                                                       BorderRadius.circular(
                                                     8,
                                                   ),
                                                 ),
-                                                Child:
+                                                child:
                                                     Text(
-                                                  ‘$course • $examType’,
-                                                  Style:
+                                                  '$course • $examType',
+                                                  style:
                                                       GoogleFonts.poppins(
                                                     fontSize:
                                                         11,
-                                                    Color:
+                                                    color:
                                                         Colors.white,
                                                   ),
                                                 ),
@@ -2556,12 +2289,12 @@ Return StreamBuilder<DocumentSnapshot>(
                                           ),
                                         ),
                                         IconButton(
-                                          Icon:
+                                          icon:
                                               Icon(
                                             isFav
                                                 ? Icons.bookmark
                                                 : Icons.bookmark_border,
-                                            Color:
+                                            color:
                                                 primaryGreen,
                                           ),
                                           onPressed:
@@ -2571,35 +2304,35 @@ Return StreamBuilder<DocumentSnapshot>(
                                           ),
                                         ),
                                         IconButton(
-                                          Icon:
-                                              Const Icon(
+                                          icon:
+                                              const Icon(
                                             Icons.share,
-                                            Color:
+                                            color:
                                                 Colors.grey,
-                                            Size:
+                                            size:
                                                 24,
                                           ),
                                           onPressed:
                                               () =>
                                                   _shareResource(
-                                            Title,
+                                            title,
                                             fileUrl,
                                           ),
                                         ),
-                                        If (fileUrl
+                                        if (fileUrl
                                             .toLowerCase()
                                             .contains(
-                                              ‘.pdf’,
+                                              '.pdf',
                                             ))
                                           IconButton(
-                                            Icon:
+                                            icon:
                                                 Icon(
                                               Icons.quiz,
-                                              Color:
+                                              color:
                                                   primaryGreen,
                                             ),
-                                            Tooltip:
-                                                ‘Generate Flashcards’,
+                                            tooltip:
+                                                'Generate Flashcards',
                                             onPressed:
                                                 () =>
                                                     _generateFlashcardsFromPdf(
@@ -2608,10 +2341,10 @@ Return StreamBuilder<DocumentSnapshot>(
                                             ),
                                           ),
                                         IconButton(
-                                          Icon:
-                                              Const Icon(
+                                          icon:
+                                              const Icon(
                                             Icons.open_in_new,
-                                            Color:
+                                            color:
                                                 secondaryBlue,
                                             size:
                                                 28,
@@ -2626,57 +2359,57 @@ Return StreamBuilder<DocumentSnapshot>(
                                         ),
                                       ],
                                     ),
-                                    Const SizedBox(
-                                      Height:
+                                    const SizedBox(
+                                      height:
                                           10,
                                     ),
                                     Row(
-                                      Children: [
-                                        Const Icon(
+                                      children: [
+                                        const Icon(
                                           Icons
                                               .calendar_today,
-                                          Size:
+                                          size:
                                               12,
-                                          Color:
+                                          color:
                                               Colors.grey,
                                         ),
-                                        Const SizedBox(
-                                          Width:
+                                        const SizedBox(
+                                          width:
                                               4,
                                         ),
                                         Text(
                                           _formatDate(
-                                            Data[
-                                                ‘uploadedAt’],
+                                            data[
+                                                'uploadedAt'],
                                           ),
-                                          Style:
+                                          style:
                                               GoogleFonts.poppins(
                                             fontSize:
                                                 11,
                                           ),
                                         ),
-                                        Const SizedBox(
-                                          Width:
+                                        const SizedBox(
+                                          width:
                                               12,
                                         ),
-                                        Const Icon(
+                                        const Icon(
                                           Icons
                                               .data_object,
-                                          Size:
+                                          size:
                                               12,
-                                          Color:
+                                          color:
                                               Colors.grey,
                                         ),
-                                        Const SizedBox(
-                                          Width:
+                                        const SizedBox(
+                                          width:
                                               4,
                                         ),
                                         Text(
                                           _formatBytes(
-                                            Data[
-                                                ‘fileSize’],
+                                            data[
+                                                'fileSize'],
                                           ),
-                                          Style:
+                                          style:
                                               GoogleFonts.poppins(
                                             fontSize:
                                                 11,
@@ -2684,26 +2417,26 @@ Return StreamBuilder<DocumentSnapshot>(
                                         ),
                                       ],
                                     ),
-                                    Const SizedBox(
-                                      Height:
+                                    const SizedBox(
+                                      height:
                                           10,
                                     ),
                                     Row(
                                       mainAxisAlignment:
                                           MainAxisAlignment
                                               .spaceBetween,
-                                      Children: [
+                                      children: [
                                         Row(
-                                          Children: [
+                                          children: [
                                             IconButton(
-                                              Icon:
+                                              icon:
                                                   Icon(
                                                 Icons.favorite,
-                                                Color:
+                                                color:
                                                     isLiked
                                                         ? Colors.red
                                                         : Colors.grey,
-                                                Size:
+                                                size:
                                                     20,
                                               ),
                                               onPressed:
@@ -2713,8 +2446,8 @@ Return StreamBuilder<DocumentSnapshot>(
                                               ),
                                             ),
                                             Text(
-                                              ‘${data[‘likes’] ?? 0}’,
-                                              Style:
+                                              '${data['likes'] ?? 0}',
+                                              style:
                                                   GoogleFonts.poppins(
                                                 fontSize:
                                                     12,
@@ -2723,25 +2456,25 @@ Return StreamBuilder<DocumentSnapshot>(
                                           ],
                                         ),
                                         Row(
-                                          Children: [
-                                            Const Icon(
+                                          children: [
+                                            const Icon(
                                               Icons.star,
-                                              Color:
+                                              color:
                                                   Colors.amber,
-                                              Size:
+                                              size:
                                                   20,
                                             ),
                                             Text(
-                                              ‘ ${(data[‘rating’] is num ? (data[‘rating’] as num).toDouble() : 0.0).toStringAsFixed(1)}’,
-                                              Style:
+                                              ' ${(data['rating'] is num ? (data['rating'] as num).toDouble() : 0.0).toStringAsFixed(1)}',
+                                              style:
                                                   GoogleFonts.poppins(
                                                 fontSize:
                                                     12,
                                               ),
                                             ),
                                             PopupMenuButton<
-                                                Double>(
-                                              Enabled:
+                                                double>(
+                                              enabled:
                                                   !isRated,
                                               onSelected:
                                                   (val) =>
@@ -2760,24 +2493,24 @@ Return StreamBuilder<DocumentSnapshot>(
                                               ]
                                                           .map(
                                                             (
-                                                              E,
+                                                              e,
                                                             ) =>
                                                                 PopupMenuItem<double>(
-                                                              Value:
-                                                                  E,
-                                                              Child:
+                                                              value:
+                                                                  e,
+                                                              child:
                                                                   Text(
-                                                                ‘${e.toInt()} Star’,
+                                                                '${e.toInt()} Star',
                                                               ),
                                                             ),
                                                           )
                                                           .toList(),
-                                              Child:
+                                              child:
                                                   Icon(
                                                 Icons.rate_review,
-                                                Size:
+                                                size:
                                                     20,
-                                                Color:
+                                                color:
                                                     isRated
                                                         ? Colors.grey
                                                         : Colors.black,
@@ -2786,17 +2519,17 @@ Return StreamBuilder<DocumentSnapshot>(
                                           ],
                                         ),
                                         Row(
-                                          Children: [
-                                            Const Icon(
+                                          children: [
+                                            const Icon(
                                               Icons.download,
-                                              Color:
+                                              color:
                                                   Colors.blue,
-                                              Size:
+                                              size:
                                                   20,
                                             ),
                                             Text(
-                                              ‘ ${data[‘downloads’] ?? 0}’,
-                                              Style:
+                                              ' ${data['downloads'] ?? 0}',
+                                              style:
                                                   GoogleFonts.poppins(
                                                 fontSize:
                                                     12,
@@ -2821,154 +2554,132 @@ Return StreamBuilder<DocumentSnapshot>(
           ),
         );
       },
-);
+    );
   }
 }
-
 // -----------------------------------------------------------------------------
 // MY UPLOAD ITEM
 // -----------------------------------------------------------------------------
-
-Class _MyUploadItem {
-  Final QueryDocumentSnapshot document;
-  Final bool isPendingCollection;
-
-  Const _MyUploadItem({
-Required this.document,
-Required this.isPendingCollection,
+class _MyUploadItem {
+  final QueryDocumentSnapshot document;
+  final bool isPendingCollection;
+  const _MyUploadItem({
+    required this.document,
+    required this.isPendingCollection,
   });
 }
-
 // -----------------------------------------------------------------------------
 // FLASHCARD DIALOG
 // -----------------------------------------------------------------------------
-
-Class _FlashcardDialog extends StatefulWidget {
-  Final String subject;
-
-  Const _FlashcardDialog({
-Required this.subject,
+class _FlashcardDialog extends StatefulWidget {
+  final String subject;
+  const _FlashcardDialog({
+    required this.subject,
   });
-
   @override
   State<_FlashcardDialog> createState() =>
       _FlashcardDialogState();
 }
-
-Class _FlashcardDialogState
-Extends State<_FlashcardDialog> {
+class _FlashcardDialogState
+    extends State<_FlashcardDialog> {
   List<Flashcard> _cards = [];
-  Bool _isLoading = true;
-
-  Int _index = 0;
-  Bool _showAnswer = false;
-
+  bool _isLoading = true;
+  int _index = 0;
+  bool _showAnswer = false;
   @override
-  Void initState() {
-Super.initState();
-_generate();
+  void initState() {
+    super.initState();
+    _generate();
   }
-
   Future<void> _generate() async {
-Try {
-      Final String prompt =
-          ‘’’
+    try {
+      final String prompt =
+          '''
 Generate 10 flashcards for ${widget.subject} for high school exams.
-
 Rules:
 1. Return ONLY a valid JSON array. No markdown, no asterisks, no explanation.
-2. Format: [{“q”: “question”, “a”: “answer”}]
+2. Format: [{"q": "question", "a": "answer"}]
 3. For formulas write them in plain LaTeX without \$ signs. Example: F = ma, E = mc^2, \\frac{a}{b}, x^2
 4. Keep answers short, max 15 words.
-‘’’;
-
-      Final GenerateContentResponse response =
-          Await model.generateContent([
+''';
+      final GenerateContentResponse response =
+          await model.generateContent([
         Content.text(prompt),
       ]);
-
-      String text = response.text ?? ‘’;
-
-      Text = text
-          .replaceAll(‘```json’, ‘’)
-          .replaceAll(‘```’, ‘’)
+      String text = response.text ?? '';
+      text = text
+          .replaceAll('```json', '')
+          .replaceAll('```', '')
           .trim();
-
-      Final dynamic decoded = jsonDecode(text);
-
-      If (decoded is! List) {
-        Throw Exception(
-          ‘Invalid AI response’,
+      final dynamic decoded = jsonDecode(text);
+      if (decoded is! List) {
+        throw Exception(
+          'Invalid AI response',
         );
       }
-
-      Final List<Flashcard> cards = decoded
+      final List<Flashcard> cards = decoded
           .whereType<Map>()
           .map(
-            € => Flashcard(
-              Question:
-                  E[‘q’]?.toString() ?? ‘’,
-              Answer:
-                  E[‘a’]?.toString() ?? ‘’,
+            (e) => Flashcard(
+              question:
+                  e['q']?.toString() ?? '',
+              answer:
+                  e['a']?.toString() ?? '',
             ),
           )
           .where(
             (card) =>
-                Card.question.isNotEmpty &&
-                Card.answer.isNotEmpty,
+                card.question.isNotEmpty &&
+                card.answer.isNotEmpty,
           )
           .toList();
-
-      If (!mounted) return;
-
+      if (!mounted) return;
       setState(() {
         _cards = cards;
         _isLoading = false;
       });
-} catch € {
-      If (!mounted) return;
-
+    } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
-}
+    }
   }
-
   @override
   Widget build(BuildContext context) {
-Return Dialog(
-      Child: Container(
-        Height: 400,
-        Padding: const EdgeInsets.all(16),
-        Child: _isLoading
+    return Dialog(
+      child: Container(
+        height: 400,
+        padding: const EdgeInsets.all(16),
+        child: _isLoading
             ? const Center(
-                Child:
+                child:
                     CircularProgressIndicator(),
               )
             : _cards.isEmpty
                 ? Center(
-                    Child: Text(
-                      ‘Could not generate flashcards.’,
-                      Style:
+                    child: Text(
+                      'Could not generate flashcards.',
+                      style:
                           GoogleFonts.poppins(),
                     ),
                   )
                 : Column(
-                    Children: [
+                    children: [
                       Text(
-                        ‘${widget.subject} Flashcards’,
-                        Style:
+                        '${widget.subject} Flashcards',
+                        style:
                             GoogleFonts.poppins(
                           fontSize: 20,
                           fontWeight:
                               FontWeight.bold,
                         ),
                       ),
-                      Const SizedBox(
-                        Height: 20,
+                      const SizedBox(
+                        height: 20,
                       ),
                       Expanded(
-                        Child:
+                        child:
                             GestureDetector(
                           onTap: () {
                             setState(() {
@@ -2976,19 +2687,19 @@ Return Dialog(
                                   !_showAnswer;
                             });
                           },
-                          Child: Card(
-                            Color:
-                                Const Color(
+                          child: Card(
+                            color:
+                                const Color(
                               0xFF00C896,
                             ),
-                            Child: Center(
-                              Child: Padding(
-                                Padding:
-                                    Const EdgeInsets
+                            child: Center(
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets
                                         .all(
                                   20,
                                 ),
-                                Child:
+                                child:
                                     _buildMathText(
                                   _showAnswer
                                       ? _cards[
@@ -2997,16 +2708,16 @@ Return Dialog(
                                       : _cards[
                                           _index]
                                           .question,
-                                  Style:
+                                  style:
                                       GoogleFonts
                                           .poppins(
                                     fontSize:
                                         22,
-                                    Color:
+                                    color:
                                         Colors
                                             .white,
                                   ),
-                                  Align:
+                                  align:
                                       TextAlign
                                           .center,
                                 ),
@@ -3019,7 +2730,7 @@ Return Dialog(
                         mainAxisAlignment:
                             MainAxisAlignment
                                 .spaceBetween,
-                        Children: [
+                        children: [
                           TextButton(
                             onPressed:
                                 _index > 0
@@ -3028,37 +2739,37 @@ Return Dialog(
                                           () {
                                             _index--;
                                             _showAnswer =
-                                                False;
+                                                false;
                                           },
                                         );
                                       }
                                     : null,
-                            Child:
-                                Const Text(
-                              ‘Prev’,
+                            child:
+                                const Text(
+                              'Prev',
                             ),
                           ),
                           Text(
-                            ‘${_index + 1}/${_cards.length}’,
+                            '${_index + 1}/${_cards.length}',
                           ),
                           TextButton(
                             onPressed:
                                 _index <
-                                        _cards.length –
+                                        _cards.length -
                                             1
                                     ? () {
                                         setState(
                                           () {
                                             _index++;
                                             _showAnswer =
-                                                False;
+                                                false;
                                           },
                                         );
                                       }
                                     : null,
-                            Child:
-                                Const Text(
-                              ‘Next’,
+                            child:
+                                const Text(
+                              'Next',
                             ),
                           ),
                         ],
@@ -3066,86 +2777,79 @@ Return Dialog(
                     ],
                   ),
       ),
-);
+    );
   }
 }
-
 // -----------------------------------------------------------------------------
 // FLASHCARD DIALOG FROM PDF
 // -----------------------------------------------------------------------------
-
-Class _FlashcardDialogFromList
-Extends StatefulWidget {
-  Final List<Flashcard> cards;
-  Final String title;
-
-  Const _FlashcardDialogFromList({
-Required this.cards,
-Required this.title,
+class _FlashcardDialogFromList
+    extends StatefulWidget {
+  final List<Flashcard> cards;
+  final String title;
+  const _FlashcardDialogFromList({
+    required this.cards,
+    required this.title,
   });
-
   @override
   State<_FlashcardDialogFromList> createState() =>
       _FlashcardDialogFromListState();
 }
-
-Class _FlashcardDialogFromListState
-Extends State<_FlashcardDialogFromList> {
-  Int _index = 0;
-  Bool _showAnswer = false;
-
+class _FlashcardDialogFromListState
+    extends State<_FlashcardDialogFromList> {
+  int _index = 0;
+  bool _showAnswer = false;
   @override
   Widget build(BuildContext context) {
-If (widget.cards.isEmpty) {
-      Return const Dialog(
-        Child: Padding(
-          Padding: EdgeInsets.all(24),
-          Child: Text(
-            ‘No flashcards available.’,
+    if (widget.cards.isEmpty) {
+      return const Dialog(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'No flashcards available.',
           ),
         ),
       );
-}
-
-Return Dialog(
-      Child: Container(
-        Height: 400,
-        Padding: const EdgeInsets.all(16),
-        Child: Column(
-          Children: [
+    }
+    return Dialog(
+      child: Container(
+        height: 400,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
             Text(
-              ‘Flashcards from: ${widget.title}’,
+              'Flashcards from: ${widget.title}',
               maxLines: 2,
               overflow:
                   TextOverflow.ellipsis,
-              Style: GoogleFonts.poppins(
+              style: GoogleFonts.poppins(
                 fontSize: 18,
                 fontWeight:
                     FontWeight.bold,
               ),
             ),
-            Const SizedBox(
-              Height: 20,
+            const SizedBox(
+              height: 20,
             ),
             Expanded(
-              Child: GestureDetector(
+              child: GestureDetector(
                 onTap: () {
                   setState(() {
                     _showAnswer =
                         !_showAnswer;
                   });
                 },
-                Child: Card(
-                  Color:
-                      Const Color(0xFF00C896),
-                  Child: Center(
-                    Child: Padding(
-                      Padding:
-                          Const EdgeInsets
+                child: Card(
+                  color:
+                      const Color(0xFF00C896),
+                  child: Center(
+                    child: Padding(
+                      padding:
+                          const EdgeInsets
                               .all(
                         20,
                       ),
-                      Child: _buildMathText(
+                      child: _buildMathText(
                         _showAnswer
                             ? widget
                                 .cards[
@@ -3155,13 +2859,13 @@ Return Dialog(
                                 .cards[
                                     _index]
                                 .question,
-                        Style:
+                        style:
                             GoogleFonts.poppins(
                           fontSize: 22,
                           color:
                               Colors.white,
                         ),
-                        Align:
+                        align:
                             TextAlign.center,
                       ),
                     ),
@@ -3173,7 +2877,7 @@ Return Dialog(
               mainAxisAlignment:
                   MainAxisAlignment
                       .spaceBetween,
-              Children: [
+              children: [
                 TextButton(
                   onPressed:
                       _index > 0
@@ -3182,41 +2886,41 @@ Return Dialog(
                                 () {
                                   _index--;
                                   _showAnswer =
-                                      False;
+                                      false;
                                 },
                               );
                             }
                           : null,
-                  Child:
-                      Const Text(‘Prev’),
+                  child:
+                      const Text('Prev'),
                 ),
                 Text(
-                  ‘${_index + 1}/${widget.cards.length}’,
+                  '${_index + 1}/${widget.cards.length}',
                 ),
                 TextButton(
                   onPressed:
                       _index <
-                              Widget.cards.length –
+                              widget.cards.length -
                                   1
                           ? () {
                               setState(
                                 () {
                                   _index++;
                                   _showAnswer =
-                                      False;
+                                      false;
                                 },
                               );
                             }
                           : null,
-                  Child:
-                      Const Text(‘Next’),
+                  child:
+                      const Text('Next'),
                 ),
               ],
             ),
           ],
         ),
       ),
-);
+    );
   }
 }
 
@@ -3226,605 +2930,507 @@ Return Dialog(
 // Conversation is persisted for 24 hours using SharedPreferences.
 // After 24 hours the stored conversation is automatically removed.
 // -----------------------------------------------------------------------------
-
-Class _GeminiChatSheet
-Extends StatefulWidget {
-  Const _GeminiChatSheet();
-
+class _GeminiChatSheet
+    extends StatefulWidget {
+  const _GeminiChatSheet();
   @override
   State<_GeminiChatSheet> createState() =>
       _GeminiChatSheetState();
 }
-
-Class _GeminiChatSheetState
-Extends State<_GeminiChatSheet> {
-  Final TextEditingController _controller =
+class _GeminiChatSheetState
+    extends State<_GeminiChatSheet> {
+  final TextEditingController _controller =
       TextEditingController();
-
-  Final List<Map<String, String>> _chat =
+      
+  final List<Map<String, String>> _chat =
       [];
-
-  Bool _isLoading = false;
-
-  Final ScrollController _scrollController =
+  bool _isLoading = false;
+  final ScrollController _scrollController =
       ScrollController();
-
   // Keys used to save the AI conversation.
-  Static const String _chatStorageKey =
-      ‘exam_hook_ai_chat’;
-
-  Static const String _chatTimeKey =
-      ‘exam_hook_ai_chat_time’;
-
+  static const String _chatStorageKey =
+      'exam_hook_ai_chat';
+  static const String _chatTimeKey =
+      'exam_hook_ai_chat_time';
   // Conversation lifetime.
-  Static const Duration _chatLifetime =
+  static const Duration _chatLifetime =
       Duration(hours: 24);
+     
+     Widget _renderGeminiText(String text, BuildContext context, String originalText) {
+  // 1. Strip markdown that causes sticking
+  String cleaned = text
+      .replaceAll('*', '')
+      .replaceAll('_', '')
+      .replaceAll('`', '')
+      .trim();
 
+  // 2. Fix common collapsed words from Gemini
+  cleaned = cleaned
+      .replaceAll('numberof', 'number of')
+      .replaceAll('massof', 'mass of')
+      .replaceAll('totalmass', 'total mass')
+      .replaceAll('BindingEnergy', 'Binding Energy')
+      .replaceAll('speedoflight', 'speed of light')
+      .replaceAll('massdefect', 'mass defect')
+      .replaceAll('pernucleon', 'per nucleon');
+
+  return GestureDetector(
+    onLongPress: () {
+      _showMessageOptions(context, originalText, false); // false = AI message
+    },
+    child: SingleChildScrollView( // <-- HORIZONTAL SCROLL
+      scrollDirection: Axis.horizontal,
+      child: SelectableText( // <-- COPYABLE
+        cleaned,
+        style: GoogleFonts.poppins(
+          color: Colors.black,
+          fontSize: 15,
+          height: 1.6,
+        ),
+        textAlign: TextAlign.left,
+      ),
+    ),
+  );
+}
+    
+
+void _showMessageOptions(BuildContext context, String message, bool isUser) {
+  showModalBottomSheet(
+    context: context,
+    builder: (_) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.copy),
+              title: const Text('Copy'),
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: message));
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Copied to clipboard')),
+                );
+              },
+            ),
+            if (!isUser) // Only allow reply to AI
+              ListTile(
+                leading: const Icon(Icons.reply),
+                title: const Text('Reply to this'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _controller.text = "@AI $message\n"; // prefill with quote
+                  _controller.selection = TextSelection.fromPosition(
+                    TextPosition(offset: _controller.text.length),
+                  );
+                },
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
+   
   @override
-  Void initState() {
-Super.initState();
-_loadChat();
+  void initState() {
+    super.initState();
+    _loadChat();
   }
-
   @override
-  Void dispose() {
-_controller.dispose();
+  void dispose() {
+    _controller.dispose();
     _scrollController.dispose();
-Super.dispose();
+    super.dispose();
   }
-
   // ---------------------------------------------------------------------------
   // LOAD AI CHAT
   // ---------------------------------------------------------------------------
-
   Future<void> _loadChat() async {
-Try {
-      Final SharedPreferences prefs =
-          Await SharedPreferences.getInstance();
-
-      Final int? savedTime =
-          Prefs.getInt(_chatTimeKey);
-
-      Final List<String>? savedMessages =
-          Prefs.getStringList(
+    try {
+      final SharedPreferences prefs =
+          await SharedPreferences.getInstance();
+      final int? savedTime =
+          prefs.getInt(_chatTimeKey);
+      final List<String>? savedMessages =
+          prefs.getStringList(
         _chatStorageKey,
       );
-
-      If (savedTime == null ||
+      if (savedTime == null ||
           savedMessages == null ||
           savedMessages.isEmpty) {
         return;
       }
-
-      Final DateTime savedAt =
+      final DateTime savedAt =
           DateTime.fromMillisecondsSinceEpoch(
         savedTime,
       );
-
-      Final Duration age =
+      final Duration age =
           DateTime.now().difference(savedAt);
-
       // Automatically remove conversation after 24 hours.
-      If (age >= _chatLifetime) {
-        Await prefs.remove(_chatStorageKey);
-        Await prefs.remove(_chatTimeKey);
-        Return;
+      if (age >= _chatLifetime) {
+        await prefs.remove(_chatStorageKey);
+        await prefs.remove(_chatTimeKey);
+        return;
       }
-
-      Final List<Map<String, String>>
+      final List<Map<String, String>>
           restoredChat = [];
-
       for (final String encoded
           in savedMessages) {
         try {
           final dynamic decoded =
               jsonDecode(encoded);
-
           if (decoded is Map) {
             final String role =
-                decoded[‘role’]?.toString() ?? ‘’;
-
+                decoded['role']?.toString() ?? '';
             final String text =
-                decoded[‘text’]?.toString() ?? ‘’;
-
+                decoded['text']?.toString() ?? '';
             if (role.isNotEmpty &&
                 text.isNotEmpty) {
               restoredChat.add({
-                ‘role’: role,
-                ‘text’: text,
+                'role': role,
+                'text': text,
               });
             }
           }
-        } catch € {
+        } catch (e) {
           debugPrint(
-            ‘Could not restore AI message: $e’,
+            'Could not restore AI message: $e',
           );
         }
       }
-
-      If (!mounted) return;
-
+      if (!mounted) return;
       setState(() {
         _chat.clear();
         _chat.addAll(restoredChat);
       });
-
       _scrollToBottom();
-} catch € {
+    } catch (e) {
       debugPrint(
-        ‘AI chat load error: $e’,
+        'AI chat load error: $e',
       );
-}
+    }
   }
-
   // ---------------------------------------------------------------------------
   // SAVE AI CHAT
   // ---------------------------------------------------------------------------
-
   Future<void> _saveChat() async {
-Try {
-      Final SharedPreferences prefs =
-          Await SharedPreferences.getInstance();
-
-      Final List<String> encodedMessages =
+    try {
+      final SharedPreferences prefs =
+          await SharedPreferences.getInstance();
+      final List<String> encodedMessages =
           _chat.map((message) {
-        Return jsonEncode({
-          ‘role’: message[‘role’] ?? ‘’,
-          ‘text’: message[‘text’] ?? ‘’,
+        return jsonEncode({
+          'role': message['role'] ?? '',
+          'text': message['text'] ?? '',
         });
       }).toList();
-
-      Await prefs.setStringList(
+      await prefs.setStringList(
         _chatStorageKey,
         encodedMessages,
       );
-
       // Only set the timestamp if this conversation
       // does not already have one.
-      If (!prefs.containsKey(_chatTimeKey)) {
-        Await prefs.setInt(
+      if (!prefs.containsKey(_chatTimeKey)) {
+        await prefs.setInt(
           _chatTimeKey,
           DateTime.now()
               .millisecondsSinceEpoch,
         );
       }
-} catch € {
+    } catch (e) {
       debugPrint(
-        ‘AI chat save error: $e’,
+        'AI chat save error: $e',
       );
-}
+    }
   }
-
   // ---------------------------------------------------------------------------
   // CLEAR EXPIRED CHAT
   // ---------------------------------------------------------------------------
-
   Future<void> _clearExpiredChatIfNeeded() async {
-Try {
-      Final SharedPreferences prefs =
-          Await SharedPreferences.getInstance();
-
-      Final int? savedTime =
-          Prefs.getInt(_chatTimeKey);
-
-      If (savedTime == null) {
-        Return;
+    try {
+      final SharedPreferences prefs =
+          await SharedPreferences.getInstance();
+      final int? savedTime =
+          prefs.getInt(_chatTimeKey);
+      if (savedTime == null) {
+        return;
       }
-
-      Final DateTime savedAt =
+      final DateTime savedAt =
           DateTime.fromMillisecondsSinceEpoch(
         savedTime,
       );
-
-      If (DateTime.now().difference(savedAt) >=
+      if (DateTime.now().difference(savedAt) >=
           _chatLifetime) {
-        Await prefs.remove(_chatStorageKey);
-        Await prefs.remove(_chatTimeKey);
-
-        If (!mounted) return;
-
+        await prefs.remove(_chatStorageKey);
+        await prefs.remove(_chatTimeKey);
+        if (!mounted) return;
         setState(() {
           _chat.clear();
         });
       }
-} catch € {
+    } catch (e) {
       debugPrint(
-        ‘AI chat expiry error: $e’,
+        'AI chat expiry error: $e',
       );
-}
+    }
   }
-
   // ---------------------------------------------------------------------------
   // SCROLL
   // ---------------------------------------------------------------------------
-
-  Void _scrollToBottom() {
-Future.delayed(
-      Const Duration(milliseconds: 150),
+  void _scrollToBottom() {
+    Future.delayed(
+      const Duration(milliseconds: 150),
       () {
-        If (!_scrollController.hasClients) {
-          Return;
+        if (!_scrollController.hasClients) {
+          return;
         }
-
         _scrollController.animateTo(
           0,
-          Duration:
-              Const Duration(milliseconds: 200),
-          Curve: Curves.easeOut,
+          duration:
+              const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
         );
       },
-);
+    );
   }
-
   // ---------------------------------------------------------------------------
   // ASK AI
   // ---------------------------------------------------------------------------
-
   Future<void> _ask() async {
-Await _clearExpiredChatIfNeeded();
-
-Final String question =
+    await _clearExpiredChatIfNeeded();
+    final String question =
         _controller.text.trim();
-
-If (question.isEmpty ||
+    if (question.isEmpty ||
         _isLoading) {
-      Return;
-}
-
-If (!mounted) return;
-
-setState(() {
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
       _chat.add({
-        ‘role’: ‘user’,
-        ‘text’: question,
+        'role': 'user',
+        'text': question,
       });
-
       _isLoading = true;
-});
-
-_controller.clear();
-
-// Save immediately so the user message survives
-// closing/reopening the AI sheet.
-Await _saveChat();
-
-Try {
-      Final String prompt =
-          ‘’’
+    });
+    _controller.clear();
+    // Save immediately so the user message survives
+    // closing/reopening the AI sheet.
+    await _saveChat();
+    try {
+      final String prompt =
+          '''
 You are ExamHook AI tutor for high school students in Zimbabwe.
-
 Rules:
 1. Do NOT use asterisks for bold or italic.
-2. Use plain text with headings like “Definition:”
-3. For formulas write them in plain LaTeX without \$ signs. Example: F = ma, E = mc^2, \\\\frac{a}{b}, x^2, \\\\sqrt{b^2 – 4ac}
+2. Use plain text with headings like "Definition:"
+3. For formulas write them in plain LaTeX without \$ signs. Example: F = ma, E = mc^2, \\\\frac{a}{b}, x^2, \\\\sqrt{b^2 - 4ac}
 4. Keep answers clear, short, with examples.
-
 Question: $question
-‘’’;
-
-      Final GenerateContentResponse response =
-          Await model.generateContent([
+''';
+      final GenerateContentResponse response =
+          await model.generateContent([
         Content.text(prompt),
       ]);
-
-      If (!mounted) return;
-
+      if (!mounted) return;
       setState(() {
+        final String aiResponse = response.text?.trim() ?? '';
         _chat.add({
-          ‘role’: ‘ai’,
-          ‘text’:
-              Response.text ?? ‘No answer’,
+          'role': 'ai',
+          'text': aiResponse.isNotEmpty
+              ? aiResponse
+              : 'Currently Chat with @SciWrapper at 0718502707',
         });
-
         _isLoading = false;
       });
-
-      Await _saveChat();
-
+      await _saveChat();
       _scrollToBottom();
-} catch € {
-      If (!mounted) return;
-
+    } catch (e) {
+      if (!mounted) return;
       setState(() {
         _chat.add({
-          ‘role’: ‘ai’,
-          ‘text’: ‘Error: $e’,
+          'role': 'ai',
+          'text': 'Currently Chat with @SciWrapper at 0718502707',
         });
-
         _isLoading = false;
       });
-
-      Await _saveChat();
-
+      await _saveChat();
       _scrollToBottom();
-}
+    }
   }
-
   // ---------------------------------------------------------------------------
   // BUILD AI CHAT
   // ---------------------------------------------------------------------------
-
-  @override
-  Widget build(BuildContext context) {
-Return Container(
-      Height:
-          MediaQuery.of(context)
-                  .size
-                  .height *
-              0.85,
-      Padding:
-          EdgeInsets.only(
-        Bottom:
-            MediaQuery.of(context)
-                .viewInsets
-                .bottom,
+@override
+Widget build(BuildContext context) {
+  return SafeArea(
+    bottom: false, // let us handle bottom padding manually
+    child: Container(
+      height: MediaQuery.of(context).size.height * 0.85,
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom, // pushes up with keyboard
       ),
-      Child: Column(
-        Children: [
+      child: Column(
+        children: [
           AppBar(
-            Title: Text(
-              ‘Ask ExamHook AI’,
-              Style:
-                  GoogleFonts.poppins(),
+            title: Text(
+              'Ask ExamHook AI',
+              style: GoogleFonts.poppins(),
             ),
-            automaticallyImplyLeading:
-                false,
-            backgroundColor:
-                const Color(0xFF00C896),
+            automaticallyImplyLeading: false,
+            backgroundColor: const Color(0xFF00C896),
             actions: [
-              // Clear AI conversation manually.
               IconButton(
-                Tooltip: ‘Clear AI conversation’,
-                Icon: const Icon(
-                  Icons.delete_outline,
-                ),
+                tooltip: 'Clear AI conversation',
+                icon: const Icon(Icons.delete_outline),
                 onPressed: _chat.isEmpty
                     ? null
                     : () async {
-                        Final bool? Confirmed =
-                            Await showDialog<bool>(
-                          Context: context,
-                          Builder:
-                              (dialogContext) {
-                            Return AlertDialog(
-                              Title: const Text(
-                                ‘Clear conversation?’,
+                        final bool? confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (dialogContext) {
+                            return AlertDialog(
+                              title: const Text('Clear conversation?'),
+                              content: const Text(
+                                'This will remove the saved AI conversation.',
                               ),
-                              Content:
-                                  Const Text(
-                                ‘This will remove the saved AI conversation.’,
-                              ),
-                              Actions: [
+                              actions: [
                                 TextButton(
                                   onPressed: () =>
-                                      Navigator.pop(
-                                    dialogContext,
-                                    false,
-                                  ),
-                                  Child:
-                                      Const Text(
-                                    ‘Cancel’,
-                                  ),
+                                      Navigator.pop(dialogContext, false),
+                                  child: const Text('Cancel'),
                                 ),
                                 ElevatedButton(
                                   onPressed: () =>
-                                      Navigator.pop(
-                                    dialogContext,
-                                    true,
-                                  ),
-                                  Child:
-                                      Const Text(
-                                    ‘Clear’,
-                                  ),
+                                      Navigator.pop(dialogContext, true),
+                                  child: const Text('Clear'),
                                 ),
                               ],
                             );
                           },
                         );
-
-                        If (confirmed != true) {
-                          Return;
-                        }
-
-                        Try {
-                          Final SharedPreferences
-                              Prefs =
-                              Await SharedPreferences
-                                  .getInstance();
-
-                          Await prefs.remove(
-                            _chatStorageKey,
-                          );
-
-                          Await prefs.remove(
-                            _chatTimeKey,
-                          );
-
-                          If (!mounted) return;
-
+                        if (confirmed != true) return;
+                        try {
+                          final SharedPreferences prefs =
+                              await SharedPreferences.getInstance();
+                          await prefs.remove(_chatStorageKey);
+                          await prefs.remove(_chatTimeKey);
+                          if (!mounted) return;
                           setState(() {
                             _chat.clear();
                           });
-                        } catch € {
-                          debugPrint(
-                            ‘Clear AI chat error: $e’,
-                          );
+                        } catch (e) {
+                          debugPrint('Clear AI chat error: $e');
                         }
                       },
               ),
             ],
           ),
-
           Expanded(
-            Child:
-                ListView.builder(
-              Controller:
-                  _scrollController,
-              Reverse: true,
-              Padding:
-                  Const EdgeInsets
-                      .all(12),
-              itemCount:
-                  _chat.length,
-              itemBuilder:
-                  (context, i) {
-                Final Map<String, String>
-                    Msg =
-                    _chat[
-                        _chat.length –
-                            1 –
-                            I];
-
-                Final bool isUser =
-                    Msg[‘role’] ==
-                        ‘user’;
-
-                Return Align(
-                  Alignment: isUser
-                      ? Alignment
-                          .centerRight
-                      : Alignment
-                          .centerLeft,
-                  Child:
-                      Container(
-                    Margin:
-                        Const EdgeInsets
-                            .symmetric(
-                      Vertical: 4,
+            child: ListView.builder(
+              controller: _scrollController,
+              reverse: true,
+              // FIX 1: HUGE bottom padding. Accounts for input row + keyboard
+              padding: EdgeInsets.only(
+                top: 12,
+                left: 12,
+                right: 12,
+                bottom: 160 + MediaQuery.of(context).viewInsets.bottom,
+              ),
+              physics: const AlwaysScrollableScrollPhysics(),
+              keyboardDismissBehavior:
+                  ScrollViewKeyboardDismissBehavior.onDrag,
+              itemCount: _chat.length,
+              itemBuilder: (context, i) {
+                final Map<String, String> msg = _chat[_chat.length - 1 - i];
+                final bool isUser = msg['role'] == 'user';
+                return Align(
+                  alignment:
+                      isUser ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    padding: const EdgeInsets.all(12),
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(context).size.width * 0.8,
                     ),
-                    Padding:
-                        Const EdgeInsets
-                            .all(12),
-                    Constraints:
-                        BoxConstraints(
-                      maxWidth:
-                          MediaQuery.of(
-                                    Context,
-                                  )
-                                  .size
-                                  .width *
-                              0.8,
+                    decoration: BoxDecoration(
+                      color: isUser
+                          ? const Color(0xFF00C896)
+                          : Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(16),
                     ),
-                    Decoration:
-                        BoxDecoration(
-                      Color: isUser
-                          ? const Color(
-                              0xFF00C896,
-                            )
-                          : Colors
-                              .grey
-                              .shade300,
-                      borderRadius:
-                          BorderRadius
-                              .circular(
-                        16,
-                      ),
-                    ),
-                    Child: isUser
-                        ? Text(
-                            Msg[‘text’] ??
-                                ‘’,
-                            Style:
-                                GoogleFonts
-                                    .poppins(
-                              Color:
-                                  Colors.white,
-                              fontSize:
-                                  15,
-                            ),
-                          )
-                        : _buildMathText(
-                            Msg[‘text’] ??
-                                ‘’,
-                            Style:
-                                GoogleFonts
-                                    .poppins(
-                              Color:
-                                  Colors.black,
-                              fontSize:
-                                  15,
-                            ),
-                            Align:
-                                TextAlign
-                                    .left,
-                          ),
+                    
+                    child: isUser
+    ? GestureDetector( // make user messages also copy/reply
+        onLongPress: () {
+          _showMessageOptions(context, msg['text'] ?? '', true);
+        },
+        child: SelectableText( // <-- COPYABLE
+          msg['text'] ?? '',
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontSize: 15,
+            height: 1.5,
+          ),
+        )
+        : _buildMathText( // AI: render LaTeX + horizontal scroll
+                  msg['text']?? '', 
+                  style: GoogleFonts.poppins(
+                    color: Colors.black, 
+                    fontSize: 15,
+                    height: 1.6,
+                  ), 
+                  align: TextAlign.left,
+                ),
+      )
+    : _renderGeminiText(msg['text'] ?? '', context, msg['text'] ?? ''), // uses helper from prev msg
                   ),
                 );
               },
             ),
           ),
-
-          If (_isLoading)
-            Const LinearProgressIndicator(
-              minHeight: 2,
-            ),
-
+          if (_isLoading) const LinearProgressIndicator(minHeight: 2),
+          // FIX 2: Wrap input in Padding so it sits above keyboard
           Padding(
-            Padding:
-                Const EdgeInsets
-                    .all(8),
-            Child: Row(
-              Children: [
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+            child: Row(
+              children: [
                 Expanded(
-                  Child:
-                      TextField(
-                    Controller:
-                        _controller,
-                    onSubmitted:
-                        (_) => _ask(),
-                    textCapitalization:
-                        TextCapitalization
-                            .sentences,
-                    Decoration:
-                        InputDecoration(
-                      hintText:
-                          ‘Ask about Maths, Physics…’,
-                      Border:
-                          OutlineInputBorder(
-                        borderRadius:
-                            BorderRadius
-                                .circular(
-                          12,
-                        ),
+                  child: TextField(
+                    controller: _controller,
+                    onSubmitted: (_) => _ask(),
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      hintText: 'Ask about Maths, Physics...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      contentPadding:
-                          const EdgeInsets
-                              .symmetric(
-                        Horizontal:
-                            12,
-                        Vertical:
-                            10,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
                       ),
                     ),
                   ),
                 ),
-                Const SizedBox(
-                  Width: 8,
-                ),
+                const SizedBox(width: 8),
                 CircleAvatar(
-                  backgroundColor:
-                      const Color(
-                    0xFF00C896,
-                  ),
-                  Child:
-                      IconButton(
-                    Icon:
-                        Const Icon(
+                  backgroundColor: const Color(0xFF00C896),
+                  child: IconButton(
+                    icon: const Icon(
                       Icons.send,
-                      Color:
-                          Colors.white,
-                      Size: 20,
+                      color: Colors.white,
+                      size: 20,
                     ),
-                    onPressed:
-                        _ask,
+                    onPressed: _ask,
                   ),
                 ),
               ],
             ),
           ),
+          SizedBox(height: MediaQuery.of(context).padding.bottom), // for iPhone home bar
         ],
       ),
-);
-  }
+    ),
+  );
 }
-
+} 

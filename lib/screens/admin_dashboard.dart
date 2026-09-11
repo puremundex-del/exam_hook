@@ -1,131 +1,131 @@
-Import ‘package:flutter/material.dart’;
-Import ‘package:supabase_flutter/supabase_flutter.dart’;
-Import ‘package:cloud_firestore/cloud_firestore.dart’;
-Import ‘package:google_fonts/google_fonts.dart’;
-Import ‘package:uuid/uuid.dart’;
-Import ‘package:file_picker/file_picker.dart’;
-Import ‘dart:typed_data’;
-Import ‘package:intl/intl.dart’;
-Import ‘package:url_launcher/url_launcher.dart’;
+import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:uuid/uuid.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:typed_data';
+import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-Class AdminDashboard extends StatefulWidget {
-  Const AdminDashboard({super.key});
+class AdminDashboard extends StatefulWidget {
+  const AdminDashboard({super.key});
 
   @override
   State<AdminDashboard> createState() => _AdminDashboardState();
 }
 
-Class _AdminDashboardState extends State<AdminDashboard>
-With SingleTickerProviderStateMixin {
-  Late TabController _tabController;
-  Final _formKey = GlobalKey<FormState>();
-  Final _titleController = TextEditingController();
-  Final _newSubjectController = TextEditingController();
-  Final _searchController = TextEditingController();
+class _AdminDashboardState extends State<AdminDashboard>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  final _formKey = GlobalKey<FormState>();
+  final _titleController = TextEditingController();
+  final _newSubjectController = TextEditingController();
+  final _searchController = TextEditingController();
 
-  String _course = ‘Maths’;
-  String _examType = ‘Notes’;
-  Bool _isUploading = false;
-  String _searchQuery = ‘’;
+  String _course = 'Maths';
+  String _examType = 'Notes';
+  bool _isUploading = false;
+  String _searchQuery = '';
 
-  Final supabase = Supabase.instance.client;
-  Final firestore = FirebaseFirestore.instance;
-  Final uuid = const Uuid();
+  final supabase = Supabase.instance.client;
+  final firestore = FirebaseFirestore.instance;
+  final uuid = const Uuid();
 
   Uint8List? _fileBytes;
   String? _fileName;
 
-  List<String> subjects = [‘Maths’, ‘Physics’, ‘Chemistry’, ‘Biology’];
+  List<String> subjects = ['Maths', 'Physics', 'Chemistry', 'Biology'];
 
   @override
-  Void initState() {
-Super.initState();
-_tabController = TabController(length: 4, vsync: this);
-_loadSettings();
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 4, vsync: this);
+    _loadSettings();
   }
 
   Future<void> _loadSettings() async {
-Try {
+    try {
       DocumentReference settingsRef =
-          Firestore.collection(‘settings’).doc(‘app’);
+          firestore.collection('settings').doc('app');
       DocumentSnapshot doc = await settingsRef.get();
-      If (doc.exists) {
-        Var data = doc.data() as Map<String, dynamic>?;
-        If (data != null && data[‘subjects’] != null) {
+      if (doc.exists) {
+        var data = doc.data() as Map<String, dynamic>?;
+        if (data != null && data['subjects'] != null) {
           setState(() {
-            subjects = List<String>.from(data[‘subjects’]);
+            subjects = List<String>.from(data['subjects']);
           });
         }
       } else {
-        Await settingsRef.set(
-          {‘subjects’: subjects},
+        await settingsRef.set(
+          {'subjects': subjects},
           SetOptions(merge: true),
         );
       }
-} catch € {
-      debugPrint(“Load settings error: $e”);
-}
+    } catch (e) {
+      debugPrint("Load settings error: $e");
+    }
   }
 
   Future<void> _pickFile() async {
-FilePickerResult? Result = await FilePicker.platform.pickFiles(
-      Type: FileType.custom,
-      allowedExtensions: [‘pdf’, ‘jpg’, ‘jpeg’, ‘png’, ‘docx’],
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'docx'],
       withData: true,
-);
+    );
 
-If (result != null) {
+    if (result != null) {
       setState(() {
         _fileBytes = result.files.first.bytes;
         _fileName = result.files.first.name;
       });
-}
+    }
   }
 
   Future<void> _uploadFile() async {
-If (!_formKey.currentState!.validate() ||
+    if (!_formKey.currentState!.validate() ||
         _fileBytes == null ||
         _fileName == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        Const SnackBar(
-          Content: Text(‘Please pick a file first’),
+        const SnackBar(
+          content: Text('Please pick a file first'),
         ),
       );
-      Return;
-}
+      return;
+    }
 
-String uniqueFileName = ‘${uuid.v4()}_$_fileName’;
+    String uniqueFileName = '${uuid.v4()}_$_fileName';
 
-setState(() => _isUploading = true);
+    setState(() => _isUploading = true);
 
-try {
+    try {
       // 1. Upload to Supabase
-      Await supabase.storage
-          .from(‘examhook-files’)
+      await supabase.storage
+          .from('examhook-files')
           .uploadBinary(uniqueFileName, _fileBytes!);
 
       String fileUrl = supabase.storage
-          .from(‘examhook-files’)
+          .from('examhook-files')
           .getPublicUrl(uniqueFileName);
 
       // 2. Save to Firestore
-      Await firestore.collection(‘resources’).add({
-        ‘title’: _titleController.text,
-        ‘course’: _course,
-        ‘examType’: _examType,
-        ‘fileUrl’: fileUrl,
-        ‘fileName’: uniqueFileName,
-        ‘fileSize’: _fileBytes!.length,
-        ‘likes’: 0,
-        ‘rating’: 0.0,
-        ‘ratingCount’: 0,
-        ‘downloads’: 0,
-        ‘uploadedAt’: FieldValue.serverTimestamp()
+      await firestore.collection('resources').add({
+        'title': _titleController.text,
+        'course': _course,
+        'examType': _examType,
+        'fileUrl': fileUrl,
+        'fileName': uniqueFileName,
+        'fileSize': _fileBytes!.length,
+        'likes': 0,
+        'rating': 0.0,
+        'ratingCount': 0,
+        'downloads': 0,
+        'uploadedAt': FieldValue.serverTimestamp()
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        Const SnackBar(
-          Content: Text(‘Resource Uploaded!’),
+        const SnackBar(
+          content: Text('Resource Uploaded!'),
           backgroundColor: Colors.green,
         ),
       );
@@ -136,164 +136,164 @@ try {
         _fileBytes = null;
         _fileName = null;
       });
-} catch € {
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          Content: Text(‘Error: $e’),
+          content: Text('Error: $e'),
           backgroundColor: Colors.red,
         ),
       );
-}
+    }
 
-setState(() => _isUploading = false);
+    setState(() => _isUploading = false);
   }
 
   Future<void> _deleteResource(String docId, String fileName) async {
-Bool confirm = await showDialog(
-          Context: context,
-          Builder: (context) => AlertDialog(
-            Title: const Text(‘Delete Resource’),
-            Content: const Text(
-              ‘Delete this file from storage and database?’,
+    bool confirm = await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Delete Resource'),
+            content: const Text(
+              'Delete this file from storage and database?',
             ),
-            Actions: [
+            actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text(‘Cancel’),
+                child: const Text('Cancel'),
               ),
               ElevatedButton(
                 onPressed: () => Navigator.pop(context, true),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.red,
                 ),
-                Child: const Text(‘Delete’),
+                child: const Text('Delete'),
               ),
             ],
           ),
         ) ??
-        False;
+        false;
 
-If (confirm) {
-      Try {
-        Await supabase.storage
-            .from(‘examhook-files’)
+    if (confirm) {
+      try {
+        await supabase.storage
+            .from('examhook-files')
             .remove([fileName]);
-      } catch € {
-        debugPrint(“Supabase delete error: $e”);
+      } catch (e) {
+        debugPrint("Supabase delete error: $e");
       }
 
-      Await firestore.collection(‘resources’).doc(docId).delete();
+      await firestore.collection('resources').doc(docId).delete();
 
       ScaffoldMessenger.of(context).showSnackBar(
-        Const SnackBar(
-          Content: Text(‘Deleted’),
+        const SnackBar(
+          content: Text('Deleted'),
           backgroundColor: Colors.orange,
         ),
       );
-}
+    }
   }
 
   Future<void> _approvePending(String docId, Map data) async {
-Try {
+    try {
       // Move file from pending_uploads/ to root
-      String oldPath = data[‘fileName’];
+      String oldPath = data['fileName'];
       String newFileName =
-          oldPath.replaceFirst(‘pending_uploads/’, ‘’);
+          oldPath.replaceFirst('pending_uploads/', '');
 
       // Copy file in supabase
-      Final bytes = await supabase.storage
-          .from(‘examhook-files’)
+      final bytes = await supabase.storage
+          .from('examhook-files')
           .download(oldPath);
 
-      Await supabase.storage
-          .from(‘examhook-files’)
+      await supabase.storage
+          .from('examhook-files')
           .uploadBinary(newFileName, bytes);
 
       String newUrl = supabase.storage
-          .from(‘examhook-files’)
+          .from('examhook-files')
           .getPublicUrl(newFileName);
 
       // Delete old pending file
-      Await supabase.storage
-          .from(‘examhook-files’)
+      await supabase.storage
+          .from('examhook-files')
           .remove([oldPath]);
 
       // Add to resources collection
-      Await firestore.collection(‘resources’).add({
-        …data,
-        ‘fileName’: newFileName,
-        ‘fileUrl’: newUrl,
-        ‘status’: ‘approved’,
-        ‘uploadedAt’: FieldValue.serverTimestamp(),
+      await firestore.collection('resources').add({
+        ...data,
+        'fileName': newFileName,
+        'fileUrl': newUrl,
+        'status': 'approved',
+        'uploadedAt': FieldValue.serverTimestamp(),
       });
 
-      Await firestore
-          .collection(‘resources_pending’)
+      await firestore
+          .collection('resources_pending')
           .doc(docId)
           .delete();
 
       ScaffoldMessenger.of(context).showSnackBar(
-        Const SnackBar(
-          Content: Text(‘Approved!’),
+        const SnackBar(
+          content: Text('Approved!'),
           backgroundColor: Colors.green,
         ),
       );
-} catch € {
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          Content: Text(‘Approve failed: $e’),
+          content: Text('Approve failed: $e'),
           backgroundColor: Colors.red,
         ),
       );
-}
+    }
   }
 
   Future<void> _rejectPending(
       String docId, String fileName) async {
-Try {
-      Await supabase.storage
-          .from(‘examhook-files’)
+    try {
+      await supabase.storage
+          .from('examhook-files')
           .remove([fileName]);
-} catch € {
-      debugPrint(“Supabase delete error: $e”);
-}
+    } catch (e) {
+      debugPrint("Supabase delete error: $e");
+    }
 
-Await firestore
-        .collection(‘resources_pending’)
+    await firestore
+        .collection('resources_pending')
         .doc(docId)
         .delete();
 
     ScaffoldMessenger.of(context).showSnackBar(
-      Const SnackBar(
-        Content: Text(‘Rejected & Deleted’),
+      const SnackBar(
+        content: Text('Rejected & Deleted'),
         backgroundColor: Colors.orange,
       ),
-);
+    );
   }
 
   // NEW: View pending uploaded file before approving/rejecting.
   Future<void> _viewPendingFile(String fileUrl, String fileName) async {
-If (fileUrl.trim().isEmpty) {
+    if (fileUrl.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        Const SnackBar(
-          Content: Text(‘File preview is not available.’),
+        const SnackBar(
+          content: Text('File preview is not available.'),
           backgroundColor: Colors.red,
         ),
       );
-      Return;
-}
+      return;
+    }
 
-Final String lowerName = fileName.toLowerCase();
-Final String lowerUrl = fileUrl.toLowerCase();
+    final String lowerName = fileName.toLowerCase();
+    final String lowerUrl = fileUrl.toLowerCase();
 
-Final bool isImage = lowerName.endsWith(‘.jpg’) ||
-        lowerName.endsWith(‘.jpeg’) ||
-        lowerName.endsWith(‘.png’) ||
-        lowerUrl.contains(‘.jpg’) ||
-        lowerUrl.contains(‘.jpeg’) ||
-        lowerUrl.contains(‘.png’);
+    final bool isImage = lowerName.endsWith('.jpg') ||
+        lowerName.endsWith('.jpeg') ||
+        lowerName.endsWith('.png') ||
+        lowerUrl.contains('.jpg') ||
+        lowerUrl.contains('.jpeg') ||
+        lowerUrl.contains('.png');
 
-if (isImage) {
+    if (isImage) {
       showDialog(
         context: context,
         builder: (context) {
@@ -310,15 +310,15 @@ if (isImage) {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  Actions: [
+                  actions: [
                     IconButton(
-                      Icon: const Icon(Icons.close),
+                      icon: const Icon(Icons.close),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ],
                 ),
                 Flexible(
-                  Child: InteractiveViewer(
+                  child: InteractiveViewer(
                     minScale: 0.5,
                     maxScale: 4.0,
                     child: Image.network(
@@ -326,32 +326,32 @@ if (isImage) {
                       fit: BoxFit.contain,
                       loadingBuilder:
                           (context, child, loadingProgress) {
-                        If (loadingProgress == null) {
-                          Return child;
+                        if (loadingProgress == null) {
+                          return child;
                         }
 
-                        Return const Padding(
-                          Padding: EdgeInsets.all(40),
-                          Child: Center(
-                            Child: CircularProgressIndicator(),
+                        return const Padding(
+                          padding: EdgeInsets.all(40),
+                          child: Center(
+                            child: CircularProgressIndicator(),
                           ),
                         );
                       },
                       errorBuilder:
                           (context, error, stackTrace) {
-                        Return const Padding(
-                          Padding: EdgeInsets.all(30),
-                          Child: Column(
+                        return const Padding(
+                          padding: EdgeInsets.all(30),
+                          child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
                                 Icons.broken_image,
-                                Size: 60,
-                                Color: Colors.grey,
+                                size: 60,
+                                color: Colors.grey,
                               ),
                               SizedBox(height: 12),
                               Text(
-                                ‘Unable to preview this image.’,
+                                'Unable to preview this image.',
                               ),
                             ],
                           ),
@@ -365,102 +365,102 @@ if (isImage) {
           );
         },
       );
-} else {
+    } else {
       // PDFs and DOCX files are opened using the device/browser.
-      Try {
-        Final Uri uri = Uri.parse(fileUrl);
+      try {
+        final Uri uri = Uri.parse(fileUrl);
 
-        Final bool launched = await launchUrl(
-          Uri,
-          Mode: LaunchMode.externalApplication,
+        final bool launched = await launchUrl(
+          uri,
+          mode: LaunchMode.externalApplication,
         );
 
-        If (!launched && mounted) {
+        if (!launched && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            Const SnackBar(
-              Content: Text(‘Unable to open this file.’),
+            const SnackBar(
+              content: Text('Unable to open this file.'),
               backgroundColor: Colors.red,
             ),
           );
         }
-      } catch € {
-        If (!mounted) return;
+      } catch (e) {
+        if (!mounted) return;
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            Content: Text(‘Unable to open file: $e’),
+            content: Text('Unable to open file: $e'),
             backgroundColor: Colors.red,
           ),
         );
       }
-}
+    }
   }
 
   Future<void> _addSubject() async {
-If (_newSubjectController.text.isEmpty) return;
+    if (_newSubjectController.text.isEmpty) return;
 
-String newSub = _newSubjectController.text.trim();
+    String newSub = _newSubjectController.text.trim();
 
-If (!subjects.contains(newSub)) {
+    if (!subjects.contains(newSub)) {
       setState(() => subjects.add(newSub));
 
       await firestore
-          .collection(‘settings’)
-          .doc(‘app’)
+          .collection('settings')
+          .doc('app')
           .set(
-            {‘subjects’: subjects},
+            {'subjects': subjects},
             SetOptions(merge: true),
           );
 
       _newSubjectController.clear();
-}
+    }
   }
 
   Future<void> _deleteSubject(String subject) async {
-setState(() => subjects.remove(subject));
+    setState(() => subjects.remove(subject));
 
-await firestore
-        .collection(‘settings’)
-        .doc(‘app’)
+    await firestore
+        .collection('settings')
+        .doc('app')
         .set(
-          {‘subjects’: subjects},
+          {'subjects': subjects},
           SetOptions(merge: true),
         );
   }
 
   Future<void> _deleteRequest(String docId) async {
-Await firestore
-        .collection(‘requests’)
+    await firestore
+        .collection('requests')
         .doc(docId)
         .delete();
 
     ScaffoldMessenger.of(context).showSnackBar(
-      Const SnackBar(
-        Content: Text(‘Request Deleted’),
+      const SnackBar(
+        content: Text('Request Deleted'),
         backgroundColor: Colors.orange,
       ),
-);
+    );
   }
 
   Future<void> _deleteComment(
       String resourceId, String commentId) async {
-Await firestore
-        .collection(‘resources’)
+    await firestore
+        .collection('resources')
         .doc(resourceId)
-        .collection(‘comments’)
+        .collection('comments')
         .doc(commentId)
         .delete();
   }
 
   @override
   Widget build(BuildContext context) {
-Const Color primaryGreen = Color(0xFF00C896);
+    const Color primaryGreen = Color(0xFF00C896);
 
-Return Scaffold(
+    return Scaffold(
       appBar: AppBar(
         title: Text(
-          ‘Admin Dashboard’,
-          Style: GoogleFonts.poppins(
+          'Admin Dashboard',
+          style: GoogleFonts.poppins(
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -469,105 +469,105 @@ Return Scaffold(
           controller: _tabController,
           tabs: const [
             Tab(
-              Icon: Icon(Icons.upload),
-              Text: ‘Upload’,
+              icon: Icon(Icons.upload),
+              text: 'Upload',
             ),
             Tab(
-              Icon: Icon(Icons.list),
-              Text: ‘Manage’,
+              icon: Icon(Icons.list),
+              text: 'Manage',
             ),
             Tab(
-              Icon: Icon(Icons.pending_actions),
-              Text: ‘Pending’,
+              icon: Icon(Icons.pending_actions),
+              text: 'Pending',
             ),
             Tab(
-              Icon: Icon(Icons.settings),
-              Text: ‘Settings’,
+              icon: Icon(Icons.settings),
+              text: 'Settings',
             ),
           ],
         ),
       ),
-      Body: TabBarView(
-        Controller: _tabController,
-        Children: [
+      body: TabBarView(
+        controller: _tabController,
+        children: [
           // TAB 1: UPLOAD
           Padding(
-            Padding: const EdgeInsets.all(16),
-            Child: Form(
-              Key: _formKey,
-              Child: ListView(
-                Children: [
+            padding: const EdgeInsets.all(16),
+            child: Form(
+              key: _formKey,
+              child: ListView(
+                children: [
                   TextFormField(
-                    Controller: _titleController,
-                    Decoration: const InputDecoration(
-                      labelText: ‘Resource Title’,
+                    controller: _titleController,
+                    decoration: const InputDecoration(
+                      labelText: 'Resource Title',
                       border: OutlineInputBorder(),
                     ),
-                    Validator: (val) =>
-                        Val!.isEmpty ? ‘Enter title’ : null,
+                    validator: (val) =>
+                        val!.isEmpty ? 'Enter title' : null,
                   ),
-                  Const SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
-                    Value: _course,
-                    Decoration: const InputDecoration(
-                      labelText: ‘Subject’,
+                    value: _course,
+                    decoration: const InputDecoration(
+                      labelText: 'Subject',
                       border: OutlineInputBorder(),
                     ),
-                    Items: subjects
+                    items: subjects
                         .map(
-                          € => DropdownMenuItem(
-                            Value: e,
-                            Child: Text€,
+                          (e) => DropdownMenuItem(
+                            value: e,
+                            child: Text(e),
                           ),
                         )
                         .toList(),
                     onChanged: (val) =>
                         setState(() => _course = val!),
                   ),
-                  Const SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
-                    Value: _examType,
-                    Decoration: const InputDecoration(
-                      labelText: ‘Exam Type’,
+                    value: _examType,
+                    decoration: const InputDecoration(
+                      labelText: 'Exam Type',
                       border: OutlineInputBorder(),
                     ),
-                    Items: [
-                      ‘ExamPrac’,
-                      ‘Notes’,
-                      ‘Quiz’,
-                      ‘Assignment’
+                    items: [
+                      'ExamPrac',
+                      'Notes',
+                      'Quiz',
+                      'Assignment'
                     ]
                         .map(
-                          € => DropdownMenuItem(
-                            Value: e,
-                            Child: Text€,
+                          (e) => DropdownMenuItem(
+                            value: e,
+                            child: Text(e),
                           ),
                         )
                         .toList(),
                     onChanged: (val) =>
                         setState(() => _examType = val!),
                   ),
-                  Const SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   ElevatedButton.icon(
                     onPressed: _pickFile,
                     icon: const Icon(Icons.attach_file),
                     label: Text(
                       _fileName == null
-                          ? ‘Pick File’
+                          ? 'Pick File'
                           : _fileName!,
                     ),
                   ),
-                  Const SizedBox(height: 24),
+                  const SizedBox(height: 24),
                   _isUploading
                       ? const Center(
-                          Child: CircularProgressIndicator(),
+                          child: CircularProgressIndicator(),
                         )
                       : ElevatedButton.icon(
-                          Icon: const Icon(Icons.cloud_upload),
-                          Label: const Text(
-                            ‘Upload to Supabase’,
+                          icon: const Icon(Icons.cloud_upload),
+                          label: const Text(
+                            'Upload to Supabase',
                           ),
-                          Style: ElevatedButton.styleFrom(
+                          style: ElevatedButton.styleFrom(
                             backgroundColor: primaryGreen,
                             minimumSize:
                                 const Size(double.infinity, 50),
@@ -581,14 +581,14 @@ Return Scaffold(
 
           // TAB 2: MANAGE RESOURCES
           Column(
-            Children: [
+            children: [
               Padding(
-                Padding: const EdgeInsets.all(12),
-                Child: TextField(
-                  Controller: _searchController,
-                  Decoration: InputDecoration(
+                padding: const EdgeInsets.all(12),
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
                     hintText:
-                        ‘Search resources by title, subject…’,
+                        'Search resources by title, subject...',
                     prefixIcon: const Icon(Icons.search),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -600,63 +600,63 @@ Return Scaffold(
                 ),
               ),
               Expanded(
-                Child: StreamBuilder<QuerySnapshot>(
-                  Stream: firestore
-                      .collection(‘resources’)
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: firestore
+                      .collection('resources')
                       .orderBy(
-                        ‘uploadedAt’,
-                        Descending: true,
+                        'uploadedAt',
+                        descending: true,
                       )
                       .snapshots(),
-                  Builder: (context, snapshot) {
-                    If (snapshot.connectionState ==
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState ==
                         ConnectionState.waiting) {
-                      Return const Center(
-                        Child: CircularProgressIndicator(),
+                      return const Center(
+                        child: CircularProgressIndicator(),
                       );
                     }
 
-                    If (snapshot.hasError) {
-                      Return Center(
-                        Child: Text(
-                          ‘Error: ${snapshot.error}’,
+                    if (snapshot.hasError) {
+                      return Center(
+                        child: Text(
+                          'Error: ${snapshot.error}',
                         ),
                       );
                     }
 
-                    If (!snapshot.hasData ||
-                        Snapshot.data!.docs.isEmpty) {
-                      Return Center(
-                        Child: Text(
-                          ‘No resources yet’,
-                          Style: GoogleFonts.poppins(),
+                    if (!snapshot.hasData ||
+                        snapshot.data!.docs.isEmpty) {
+                      return Center(
+                        child: Text(
+                          'No resources yet',
+                          style: GoogleFonts.poppins(),
                         ),
                       );
                     }
 
-                    Var docs = snapshot.data!.docs;
+                    var docs = snapshot.data!.docs;
 
-                    If (_searchQuery.isNotEmpty) {
-                      Docs = docs.where((d) {
-                        Var data =
+                    if (_searchQuery.isNotEmpty) {
+                      docs = docs.where((d) {
+                        var data =
                             d.data() as Map<String, dynamic>;
 
-                        return data[‘title’]
+                        return data['title']
                                 .toString()
                                 .toLowerCase()
                                 .contains(_searchQuery) ||
-                            Data[‘course’]
+                            data['course']
                                 .toString()
                                 .toLowerCase()
                                 .contains(_searchQuery) ||
-                            Data[‘examType’]
+                            data['examType']
                                 .toString()
                                 .toLowerCase()
                                 .contains(_searchQuery);
                       }).toList();
                     }
 
-                    Return ListView.builder(
+                    return ListView.builder(
                       itemCount: docs.length,
                       itemBuilder: (context, index) {
                         var doc = docs[index];
@@ -666,84 +666,84 @@ Return Scaffold(
                         return ExpansionTile(
                           leading: Icon(
                             _getFileIcon(
-                              Data[‘fileUrl’] ?? ‘’,
+                              data['fileUrl'] ?? '',
                             ),
-                            Color: primaryGreen,
+                            color: primaryGreen,
                           ),
-                          Title: Text(
-                            Data[‘title’] ?? ‘’,
-                            Style: GoogleFonts.poppins(
+                          title: Text(
+                            data['title'] ?? '',
+                            style: GoogleFonts.poppins(
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          Subtitle: Text(
-                            ‘${data[‘course’]} • ${data[‘examType’]}\n’
-                            ‘Likes: ${data[‘likes’]} • ‘
-                            ‘Rating: ${(data[‘rating’] ?? 0.0).toDouble().toStringAsFixed(1)} • ‘
-                            ‘Downloads: ${data[‘downloads’]}’,
+                          subtitle: Text(
+                            '${data['course']} • ${data['examType']}\n'
+                            'Likes: ${data['likes']} • '
+                            'Rating: ${(data['rating'] ?? 0.0).toDouble().toStringAsFixed(1)} • '
+                            'Downloads: ${data['downloads']}',
                           ),
-                          Trailing: IconButton(
-                            Icon: const Icon(
+                          trailing: IconButton(
+                            icon: const Icon(
                               Icons.delete,
-                              Color: Colors.red,
+                              color: Colors.red,
                             ),
                             onPressed: () => _deleteResource(
                               doc.id,
-                              data[‘fileName’],
+                              data['fileName'],
                             ),
                           ),
-                          Children: [
+                          children: [
                             StreamBuilder<QuerySnapshot>(
-                              Stream: firestore
-                                  .collection(‘resources’)
+                              stream: firestore
+                                  .collection('resources')
                                   .doc(doc.id)
-                                  .collection(‘comments’)
+                                  .collection('comments')
                                   .orderBy(
-                                    ‘timestamp’,
-                                    Descending: true,
+                                    'timestamp',
+                                    descending: true,
                                   )
                                   .snapshots(),
-                              Builder: (context, snap) {
-                                If (!snap.hasData ||
-                                    Snap.data!.docs.isEmpty) {
-                                  Return const Padding(
-                                    Padding: EdgeInsets.all(8),
-                                    Child: Text(‘No comments’),
+                              builder: (context, snap) {
+                                if (!snap.hasData ||
+                                    snap.data!.docs.isEmpty) {
+                                  return const Padding(
+                                    padding: EdgeInsets.all(8),
+                                    child: Text('No comments'),
                                   );
                                 }
 
-                                Return Column(
-                                  Children: snap.data!.docs
-                                      .map(© {
-                                    Var cd =
+                                return Column(
+                                  children: snap.data!.docs
+                                      .map((c) {
+                                    var cd =
                                         c.data() as Map;
 
                                     return ListTile(
                                       dense: true,
                                       title: Text(
-                                        cd[‘text’] ?? ‘’,
+                                        cd['text'] ?? '',
                                         style:
                                             GoogleFonts.poppins(
                                           fontSize: 13,
                                         ),
                                       ),
-                                      Subtitle: Text(
-                                        Cd[‘user’] ??
-                                            ‘Anonymous’,
-                                        Style:
+                                      subtitle: Text(
+                                        cd['user'] ??
+                                            'Anonymous',
+                                        style:
                                             GoogleFonts.poppins(
                                           fontSize: 11,
                                           color: Colors.grey,
                                         ),
                                       ),
-                                      Trailing: IconButton(
-                                        Icon: const Icon(
+                                      trailing: IconButton(
+                                        icon: const Icon(
                                           Icons.delete_outline,
-                                          Size: 18,
+                                          size: 18,
                                         ),
                                         onPressed: () =>
                                             _deleteComment(
-                                          Doc.id,
+                                          doc.id,
                                           c.id,
                                         ),
                                       ),
@@ -764,70 +764,70 @@ Return Scaffold(
 
           // TAB 3: PENDING APPROVALS
           StreamBuilder<QuerySnapshot>(
-            Stream: firestore
-                .collection(‘resources_pending’)
+            stream: firestore
+                .collection('resources_pending')
                 .orderBy(
-                  ‘uploadedAt’,
-                  Descending: true,
+                  'uploadedAt',
+                  descending: true,
                 )
                 .snapshots(),
-            Builder: (context, snap) {
-              If (snap.connectionState ==
+            builder: (context, snap) {
+              if (snap.connectionState ==
                   ConnectionState.waiting) {
-                Return const Center(
-                  Child: CircularProgressIndicator(),
+                return const Center(
+                  child: CircularProgressIndicator(),
                 );
               }
 
-              If (!snap.hasData ||
-                  Snap.data!.docs.isEmpty) {
-                Return Center(
-                  Child: Text(
-                    ‘No pending uploads’,
-                    Style: GoogleFonts.poppins(),
+              if (!snap.hasData ||
+                  snap.data!.docs.isEmpty) {
+                return Center(
+                  child: Text(
+                    'No pending uploads',
+                    style: GoogleFonts.poppins(),
                   ),
                 );
               }
 
-              Return ListView.builder(
+              return ListView.builder(
                 itemCount: snap.data!.docs.length,
                 itemBuilder: (context, i) {
                   var doc = snap.data!.docs[i];
                   var data = doc.data() as Map;
 
                   final String fileUrl =
-                      data[‘fileUrl’]?.toString() ?? ‘’;
+                      data['fileUrl']?.toString() ?? '';
 
                   final String fileName =
-                      data[‘fileName’]?.toString() ??
-                          data[‘title’]?.toString() ??
-                          ‘Uploaded File’;
+                      data['fileName']?.toString() ??
+                          data['title']?.toString() ??
+                          'Uploaded File';
 
-                  Return Card(
-                    Margin: const EdgeInsets.all(8),
-                    Child: ListTile(
-                      Leading: Icon(
+                  return Card(
+                    margin: const EdgeInsets.all(8),
+                    child: ListTile(
+                      leading: Icon(
                         _getFileIcon(
-                          Data[‘fileUrl’] ?? ‘’,
+                          data['fileUrl'] ?? '',
                         ),
-                        Color: Colors.orange,
+                        color: Colors.orange,
                       ),
-                      Title: Text(
-                        Data[‘title’] ?? ‘’,
+                      title: Text(
+                        data['title'] ?? '',
                       ),
-                      Subtitle: Text(
-                        ‘${data[‘course’]} • ${data[‘examType’]}\n’
-                        ‘Submitted: ${data[‘uploadedAt’] != null ? DateFormat(‘dd MMM’).format((data[‘uploadedAt’] as Timestamp).toDate()) : ‘’}’,
+                      subtitle: Text(
+                        '${data['course']} • ${data['examType']}\n'
+                        'Submitted: ${data['uploadedAt'] != null ? DateFormat('dd MMM').format((data['uploadedAt'] as Timestamp).toDate()) : ''}',
                       ),
-                      Trailing: Row(
+                      trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           // NEW: View file before decision
                           IconButton(
-                            Tooltip: ‘View File’,
-                            Icon: const Icon(
+                            tooltip: 'View File',
+                            icon: const Icon(
                               Icons.visibility,
-                              Color: Colors.blue,
+                              color: Colors.blue,
                             ),
                             onPressed: fileUrl.isEmpty
                                 ? null
@@ -837,27 +837,27 @@ Return Scaffold(
                                     ),
                           ),
                           IconButton(
-                            Tooltip: ‘Approve’,
-                            Icon: const Icon(
+                            tooltip: 'Approve',
+                            icon: const Icon(
                               Icons.check_circle,
-                              Color: Colors.green,
+                              color: Colors.green,
                             ),
                             onPressed: () =>
                                 _approvePending(
-                              Doc.id,
-                              Data,
+                              doc.id,
+                              data,
                             ),
                           ),
                           IconButton(
-                            Tooltip: ‘Reject’,
-                            Icon: const Icon(
+                            tooltip: 'Reject',
+                            icon: const Icon(
                               Icons.cancel,
-                              Color: Colors.red,
+                              color: Colors.red,
                             ),
                             onPressed: () =>
                                 _rejectPending(
-                              Doc.id,
-                              Data[‘fileName’],
+                              doc.id,
+                              data['fileName'],
                             ),
                           ),
                         ],
@@ -871,43 +871,43 @@ Return Scaffold(
 
           // TAB 4: SETTINGS + REQUESTS
           Padding(
-            Padding: const EdgeInsets.all(16),
-            Child: ListView(
-              Children: [
+            padding: const EdgeInsets.all(16),
+            child: ListView(
+              children: [
                 Text(
-                  ‘Manage Subjects’,
-                  Style: GoogleFonts.poppins(
+                  'Manage Subjects',
+                  style: GoogleFonts.poppins(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 Row(
-                  Children: [
+                  children: [
                     Expanded(
-                      Child: TextField(
-                        Controller: _newSubjectController,
-                        Decoration: const InputDecoration(
-                          labelText: ‘New Subject’,
+                      child: TextField(
+                        controller: _newSubjectController,
+                        decoration: const InputDecoration(
+                          labelText: 'New Subject',
                         ),
                       ),
                     ),
                     IconButton(
-                      Icon: const Icon(
+                      icon: const Icon(
                         Icons.add_circle,
-                        Color: Color(0xFF00C896),
-                        Size: 32,
+                        color: Color(0xFF00C896),
+                        size: 32,
                       ),
                       onPressed: _addSubject,
                     ),
                   ],
                 ),
-                Const SizedBox(height: 10),
+                const SizedBox(height: 10),
                 Wrap(
-                  Spacing: 8,
-                  Children: subjects
+                  spacing: 8,
+                  children: subjects
                       .map(
                         (s) => Chip(
-                          Label: Text(s),
+                          label: Text(s),
                           deleteIcon:
                               const Icon(Icons.close, size: 18),
                           onDeleted: () =>
@@ -916,81 +916,81 @@ Return Scaffold(
                       )
                       .toList(),
                 ),
-                Const Divider(height: 40),
+                const Divider(height: 40),
                 Text(
-                  ‘User Requests’,
-                  Style: GoogleFonts.poppins(
+                  'User Requests',
+                  style: GoogleFonts.poppins(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                Const SizedBox(height: 10),
+                const SizedBox(height: 10),
                 StreamBuilder<QuerySnapshot>(
-                  Stream: firestore
-                      .collection(‘requests’)
+                  stream: firestore
+                      .collection('requests')
                       .orderBy(
-                        ‘timestamp’,
-                        Descending: true,
+                        'timestamp',
+                        descending: true,
                       )
                       .snapshots(),
-                  Builder: (context, snap) {
-                    If (snap.connectionState ==
+                  builder: (context, snap) {
+                    if (snap.connectionState ==
                         ConnectionState.waiting) {
-                      Return const Center(
-                        Child: CircularProgressIndicator(),
+                      return const Center(
+                        child: CircularProgressIndicator(),
                       );
                     }
 
-                    If (snap.hasError) {
-                      Return Text(
-                        ‘Error: ${snap.error}’,
+                    if (snap.hasError) {
+                      return Text(
+                        'Error: ${snap.error}',
                       );
                     }
 
-                    If (!snap.hasData ||
-                        Snap.data!.docs.isEmpty) {
-                      Return Center(
-                        Child: Padding(
-                          Padding: const EdgeInsets.all(20),
-                          Child: Text(
-                            ‘No requests yet’,
-                            Style: GoogleFonts.poppins(
-                              Color: Colors.grey,
+                    if (!snap.hasData ||
+                        snap.data!.docs.isEmpty) {
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Text(
+                            'No requests yet',
+                            style: GoogleFonts.poppins(
+                              color: Colors.grey,
                             ),
                           ),
                         ),
                       );
                     }
 
-                    Return Column(
-                      Children: snap.data!.docs.map((d) {
-                        Var data =
+                    return Column(
+                      children: snap.data!.docs.map((d) {
+                        var data =
                             d.data() as Map<String, dynamic>;
 
                         return Card(
                           child: ListTile(
                             leading: const Icon(
                               Icons.mail,
-                              Color: Colors.orange,
+                              color: Colors.orange,
                             ),
-                            Title: Text(
-                              Data[‘subject’] ??
-                                  ‘No Subject’,
-                              Style: GoogleFonts.poppins(
+                            title: Text(
+                              data['subject'] ??
+                                  'No Subject',
+                              style: GoogleFonts.poppins(
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
-                            Subtitle: Text(
-                              ‘${data[‘message’] ?? ‘’}\n’
-                              ‘${data[‘timestamp’] != null ? DateFormat(‘dd MMM, hh:mm a’).format((data[‘timestamp’] as Timestamp).toDate()) : ‘’}’,
-                              Style: GoogleFonts.poppins(
+                            subtitle: Text(
+                              '${data['message'] ?? ''}\n'
+                              '${data['timestamp'] != null ? DateFormat('dd MMM, hh:mm a').format((data['timestamp'] as Timestamp).toDate()) : ''}',
+                              style: GoogleFonts.poppins(
                                 fontSize: 12,
                               ),
                             ),
-                            Trailing: IconButton(
-                              Icon: const Icon(
+                            trailing: IconButton(
+                              icon: const Icon(
                                 Icons.delete,
-                                Color: Colors.red,
+                                color: Colors.red,
                               ),
                               onPressed: () =>
                                   _deleteRequest(d.id),
@@ -1006,25 +1006,24 @@ Return Scaffold(
           ),
         ],
       ),
-);
+    );
   }
 
   IconData _getFileIcon(String url) {
-If (url.contains(‘.pdf’)) {
-      Return Icons.picture_as_pdf;
-}
+    if (url.contains('.pdf')) {
+      return Icons.picture_as_pdf;
+    }
 
-If (url.contains(‘.jpg’) ||
-        url.contains(‘.png’) ||
-        url.contains(‘.jpeg’)) {
+    if (url.contains('.jpg') ||
+        url.contains('.png') ||
+        url.contains('.jpeg')) {
       return Icons.image;
-}
+    }
 
-If (url.contains(‘.docx’)) {
-      Return Icons.description;
-}
+    if (url.contains('.docx')) {
+      return Icons.description;
+    }
 
-Return Icons.insert_drive_file;
+    return Icons.insert_drive_file;
   }
 }
-

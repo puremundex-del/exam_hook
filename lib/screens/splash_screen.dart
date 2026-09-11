@@ -109,7 +109,7 @@ class _SplashScreenState extends State<SplashScreen>
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Study Smarter. Score Higher.@SciWraaper.Study',
+                    'Study Smarter. Score Higher.@SciWrapper.Study',
                     style: GoogleFonts.poppins(
                       fontSize: 14,
                       fontWeight: FontWeight.w400,
