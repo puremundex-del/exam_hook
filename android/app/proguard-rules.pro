@@ -10,3 +10,7 @@
 -keep class java.lang.reflect.** { *; }
 
 -keepattributes *Annotation*, InnerClasses, EnclosingMethod
+# NEW: Fix for Play Core / SplitInstall
+-dontwarn com.google.android.play.core.**
+-keep class com.google.android.play.core.** { *; }
+-keep interface com.google.android.play.core.** { *; }
