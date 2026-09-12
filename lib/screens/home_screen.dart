@@ -12,11 +12,12 @@ import 'package:flutter_math_fork/flutter_math.dart';
 import 'dart:convert';
 import 'package:flutter/services.dart'; // for Clipboard
 import 'dart:typed_data';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'admin_dashboard.dart';
 import 'pdf_viewer.dart';
 import 'student_upload.dart';
 // TODO: Move this to --dart-define for production
-const String _geminiApiKey = " ";
+const String _geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
 final model = GenerativeModel(
   model: 'gemini-3.6-flash',
   apiKey: _geminiApiKey,
@@ -32,15 +33,34 @@ class Flashcard {
 // -----------------------------------------------------------------------------
 // HELPER: Auto-detect and render LaTeX without $ signs
 // -----------------------------------------------------------------------------
+
 Widget _buildMathText(
   String text, {
   TextStyle? style,
   TextAlign align = TextAlign.left,
 }) {
+  String _clean(String input) {
+    String s = input;
+    // 1. Remove markdown italics/bold/code
+    s = s.replaceAll(RegExp(r'\*\*|\*|`|_'), '');
+    // 2. Add space between lowercaseUppercase: MassNumber -> Mass Number
+    s = s.replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (m) => '${m[1]} ${m[2]}');
+    // 3. Add space between letter and number: 6protons -> 6 protons, C12 -> C 12
+    s = s.replaceAllMapped(RegExp(r'([a-zA-Z])(\d)'), (m) => '${m[1]} ${m[2]}');
+    s = s.replaceAllMapped(RegExp(r'(\d)([a-zA-Z])'), (m) => '${m[1]} ${m[2]}');
+    // 4. Fix common stuck words from your screenshot
+    s = s.replaceAll('Chas', 'C has ').replaceAll('has', 'has ');
+    s = s.replaceAll(':', ': ');
+    // 5. Collapse multiple spaces
+    s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return s;
+  }
+
   final List<Widget> widgets = [];
   final List<String> lines = text.split('\n');
   for (int i = 0; i < lines.length; i++) {
-    final String line = lines[i].trim();
+    final String rawLine = lines[i];
+    final String line = _clean(rawLine).trim(); // <-- CLEANED HERE
     if (line.isEmpty) {
       continue;
     }
@@ -52,14 +72,17 @@ Widget _buildMathText(
     if (looksLikeMath) {
       try {
         widgets.add(
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Math.tex(
-                line,
-                mathStyle: MathStyle.display,
-                textStyle: style?.copyWith(
-                  fontSize: (style.fontSize ?? 16) + 2,
+          SingleChildScrollView( // <-- ADDED for horizontal scroll
+            scrollDirection: Axis.horizontal,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Math.tex(
+                  line,
+                  mathStyle: MathStyle.display,
+                  textStyle: style?.copyWith(
+                    fontSize: (style.fontSize ?? 16) + 2,
+                  ),
                 ),
               ),
             ),
@@ -67,19 +90,25 @@ Widget _buildMathText(
         );
       } catch (e) {
         widgets.add(
-          Text(
-            line,
-            style: style,
-            textAlign: align,
+          SingleChildScrollView( // <-- ADDED for horizontal scroll
+            scrollDirection: Axis.horizontal,
+            child: Text(
+              line,
+              style: style,
+              textAlign: align,
+            ),
           ),
         );
       }
     } else {
       widgets.add(
-        Text(
-          line,
-          style: style,
-          textAlign: align,
+        SingleChildScrollView( // <-- ADDED for horizontal scroll
+          scrollDirection: Axis.horizontal,
+          child: Text(
+            line,
+            style: style,
+            textAlign: align,
+          ),
         ),
       );
     }
@@ -93,6 +122,7 @@ Widget _buildMathText(
     children: widgets,
   );
 }
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -3347,43 +3377,44 @@ Widget build(BuildContext context) {
                 return Align(
                   alignment:
                       isUser ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    padding: const EdgeInsets.all(12),
-                    constraints: BoxConstraints(
-                      maxWidth: MediaQuery.of(context).size.width * 0.8,
+                  child: GestureDetector( // Wrap container for long press on both
+                    onLongPress: () {
+                      _showMessageOptions(context, msg['text'] ?? '', isUser);
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.all(12),
+                      constraints: BoxConstraints(
+                        maxWidth: MediaQuery.of(context).size.width * 0.8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isUser
+                            ? const Color(0xFF00C896)
+                            : Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: SingleChildScrollView( // <-- FIX: horizontal scroll
+                        scrollDirection: Axis.horizontal,
+                        child: isUser
+                            ? SelectableText( // COPYABLE user text
+                                msg['text'] ?? '',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  height: 1.5,
+                                ),
+                              )
+                            : _buildMathText( // AI: render LaTeX + horizontal scroll
+                                msg['text'] ?? '',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.black,
+                                  fontSize: 15,
+                                  height: 1.6,
+                                ),
+                                align: TextAlign.left,
+                              ),
+                      ),
                     ),
-                    decoration: BoxDecoration(
-                      color: isUser
-                          ? const Color(0xFF00C896)
-                          : Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    
-                    child: isUser
-    ? GestureDetector( // make user messages also copy/reply
-        onLongPress: () {
-          _showMessageOptions(context, msg['text'] ?? '', true);
-        },
-        child: SelectableText( // <-- COPYABLE
-          msg['text'] ?? '',
-          style: GoogleFonts.poppins(
-            color: Colors.white,
-            fontSize: 15,
-            height: 1.5,
-          ),
-        )
-        : _buildMathText( // AI: render LaTeX + horizontal scroll
-                  msg['text']?? '', 
-                  style: GoogleFonts.poppins(
-                    color: Colors.black, 
-                    fontSize: 15,
-                    height: 1.6,
-                  ), 
-                  align: TextAlign.left,
-                ),
-      )
-    : _renderGeminiText(msg['text'] ?? '', context, msg['text'] ?? ''), // uses helper from prev msg
                   ),
                 );
               },

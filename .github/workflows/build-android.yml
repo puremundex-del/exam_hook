@@ -2,8 +2,8 @@ name: Build ExamHook Android
 
 on:
   push:
-    branches: [ main ]  # builds when you push to main
-  workflow_dispatch: # lets you click "Run workflow" manually
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build-android:
@@ -23,8 +23,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: 'stable'
-          channel: 'stable'
+          channel: 'stable'   # <-- FIX HERE
           cache: true
 
       - name: Install dependencies
