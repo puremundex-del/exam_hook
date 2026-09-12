@@ -112,8 +112,8 @@ class _HomeScreenState extends State<HomeScreen> {
       throw Exception("GEMINI_API_KEY is missing. Build with --dart-define=GEMINI_API_KEY=your_key");
     }
     
-    model = GenerativeModel( // <-- guaranteed to be init
-      model: 'gemini-1.5-flash',
+    model = GenerativeModel( // <-- FIXED MODEL NAME
+      model: 'gemini-3.6-flash',
       apiKey: widget.geminiApiKey,
     );
     
@@ -218,7 +218,6 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'pending': default: return Icons.pending;
     }
   }
-
 
   // RECENT / FAVORITES / THEME
   // ---------------------------------------------------------------------------
@@ -685,7 +684,7 @@ Rules:
       context: context,
       isScrollControlled: true,
       useSafeArea: true, 
-      builder: (_) => const _GeminiChatSheet(),
+      builder: (_) => _GeminiChatSheet(model: model), // <-- FIXED: PASS MODEL
     );
   }
   void _showFlashcards(String subject) {
@@ -693,8 +692,9 @@ Rules:
       context: context,
       barrierDismissible: false,
       builder: (_) {
-        return _FlashcardDialog(
+        return _FlashcardDialog( // <-- FIXED: PASS MODEL
           subject: subject,
+          model: model,
         );
       },
     );
@@ -2502,9 +2502,9 @@ class _MyUploadItem {
 // -----------------------------------------------------------------------------
 class _FlashcardDialog extends StatefulWidget {
   final String subject;
-  final GenerativeModel model,
+  final GenerativeModel model;
   const _FlashcardDialog({
-    required this.subject, required this.model, 
+    super.key, required this.subject, required this.model, 
   });
   @override
   State<_FlashcardDialog> createState() =>
@@ -2525,7 +2525,7 @@ class _FlashcardDialogState
     try {
       final String prompt =
           '''
-Generate 10 flashcards for ${widget.subject} for high school exams.
+Generate 20 flashcards for ${widget.subject} for high school exams.
 Rules:
 1. Return ONLY a valid JSON array. No markdown, no asterisks, no explanation.
 2. Format: [{"q": "question", "a": "answer"}]
@@ -2533,7 +2533,7 @@ Rules:
 4. Keep answers short, max 15 words.
 ''';
       final GenerateContentResponse response =
-          await model.generateContent([
+          await widget.model.generateContent([ // <-- FIXED: widget.model
         Content.text(prompt),
       ]);
       String text = response.text ?? '';
@@ -2860,9 +2860,11 @@ class _FlashcardDialogFromListState
 // Conversation is persisted for 24 hours using SharedPreferences.
 // After 24 hours the stored conversation is automatically removed.
 // -----------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
 class _GeminiChatSheet
     extends StatefulWidget {
-  const _GeminiChatSheet();
+  final GenerativeModel model; // <-- ADD THIS
+  const _GeminiChatSheet({super.key, required this.model}); // <-- ADD THIS
   @override
   State<_GeminiChatSheet> createState() =>
       _GeminiChatSheetState();
@@ -2886,81 +2888,81 @@ class _GeminiChatSheetState
   static const Duration _chatLifetime =
       Duration(hours: 24);
      
-     Widget _renderGeminiText(String text, BuildContext context, String originalText) {
-  // 1. Strip markdown that causes sticking
-  String cleaned = text
-      .replaceAll('*', '')
-      .replaceAll('_', '')
-      .replaceAll('`', '')
-      .trim();
+  Widget _renderGeminiText(String text, BuildContext context, String originalText) {
+    // 1. Strip markdown that causes sticking
+    String cleaned = text
+        .replaceAll('*', '')
+        .replaceAll('_', '')
+        .replaceAll('`', '')
+        .trim();
 
-  // 2. Fix common collapsed words from Gemini
-  cleaned = cleaned
-      .replaceAll('numberof', 'number of')
-      .replaceAll('massof', 'mass of')
-      .replaceAll('totalmass', 'total mass')
-      .replaceAll('BindingEnergy', 'Binding Energy')
-      .replaceAll('speedoflight', 'speed of light')
-      .replaceAll('massdefect', 'mass defect')
-      .replaceAll('pernucleon', 'per nucleon');
+    // 2. Fix common collapsed words from Gemini
+    cleaned = cleaned
+        .replaceAll('numberof', 'number of')
+        .replaceAll('massof', 'mass of')
+        .replaceAll('totalmass', 'total mass')
+        .replaceAll('BindingEnergy', 'Binding Energy')
+        .replaceAll('speedoflight', 'speed of light')
+        .replaceAll('massdefect', 'mass defect')
+        .replaceAll('pernucleon', 'per nucleon');
 
-  return GestureDetector(
-    onLongPress: () {
-      _showMessageOptions(context, originalText, false); // false = AI message
-    },
-    child: SingleChildScrollView( // <-- HORIZONTAL SCROLL
-      scrollDirection: Axis.horizontal,
-      child: SelectableText( // <-- COPYABLE
-        cleaned,
-        style: GoogleFonts.poppins(
-          color: Colors.black,
-          fontSize: 15,
-          height: 1.6,
+    return GestureDetector(
+      onLongPress: () {
+        _showMessageOptions(context, originalText, false); // false = AI message
+      },
+      child: SingleChildScrollView( // <-- HORIZONTAL SCROLL
+        scrollDirection: Axis.horizontal,
+        child: SelectableText( // <-- COPYABLE
+          cleaned,
+          style: GoogleFonts.poppins(
+            color: Colors.black,
+            fontSize: 15,
+            height: 1.6,
+          ),
+          textAlign: TextAlign.left,
         ),
-        textAlign: TextAlign.left,
       ),
-    ),
-  );
-}
+    );
+  }
     
 
-void _showMessageOptions(BuildContext context, String message, bool isUser) {
-  showModalBottomSheet(
-    context: context,
-    builder: (_) {
-      return SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.copy),
-              title: const Text('Copy'),
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: message));
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Copied to clipboard')),
-                );
-              },
-            ),
-            if (!isUser) // Only allow reply to AI
+  void _showMessageOptions(BuildContext context, String message, bool isUser) {
+    showModalBottomSheet(
+      context: context,
+      builder: (_) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               ListTile(
-                leading: const Icon(Icons.reply),
-                title: const Text('Reply to this'),
+                leading: const Icon(Icons.copy),
+                title: const Text('Copy'),
                 onTap: () {
+                  Clipboard.setData(ClipboardData(text: message));
                   Navigator.pop(context);
-                  _controller.text = "@AI $message\n"; // prefill with quote
-                  _controller.selection = TextSelection.fromPosition(
-                    TextPosition(offset: _controller.text.length),
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Copied to clipboard')),
                   );
                 },
               ),
-          ],
-        ),
-      );
-    },
-  );
-}
+              if (!isUser) // Only allow reply to AI
+                ListTile(
+                  leading: const Icon(Icons.reply),
+                  title: const Text('Reply to this'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _controller.text = "@AI $message\n"; // prefill with quote
+                    _controller.selection = TextSelection.fromPosition(
+                      TextPosition(offset: _controller.text.length),
+                    );
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
    
   @override
   void initState() {
@@ -3041,7 +3043,42 @@ void _showMessageOptions(BuildContext context, String message, bool isUser) {
       );
     }
   }
-  // ---------------------------------------------------------------------------
+
+  void _scrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 150), () {
+      if (!_scrollController.hasClients) {
+        return;
+      }
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  Future<void> _sendMessage() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    setState(() {
+      _chat.add({'role': 'user', 'text': text});
+      _isLoading = true;
+    });
+    _controller.clear();
+    _scrollToBottom();
+    try {
+      final response = await widget.model.generateContent([Content.text(text)]); // <-- FIXED: widget.model
+      setState(() {
+        _chat.add({'role': 'model', 'text': response.text ?? ''});
+        _isLoading = false;
+      });
+      _saveChat();
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
+    _scrollToBottom();
+  }
+
   // SAVE AI CHAT
   // ---------------------------------------------------------------------------
   Future<void> _saveChat() async {
@@ -3106,25 +3143,6 @@ void _showMessageOptions(BuildContext context, String message, bool isUser) {
     }
   }
   // ---------------------------------------------------------------------------
-  // SCROLL
-  // ---------------------------------------------------------------------------
-  void _scrollToBottom() {
-    Future.delayed(
-      const Duration(milliseconds: 150),
-      () {
-        if (!_scrollController.hasClients) {
-          return;
-        }
-        _scrollController.animateTo(
-          0,
-          duration:
-              const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      },
-    );
-  }
-  // ---------------------------------------------------------------------------
   // ASK AI
   // ---------------------------------------------------------------------------
   Future<void> _ask() async {
@@ -3159,7 +3177,7 @@ Rules:
 Question: $question
 ''';
       final GenerateContentResponse response =
-          await model.generateContent([
+          await widget.model.generateContent([ // <-- FIXED: widget.model
         Content.text(prompt),
       ]);
       if (!mounted) return;
