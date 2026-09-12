@@ -5,29 +5,30 @@ workflows:
     instance_type: mac_mini_m1
     environment:
       flutter: stable
+      vars:
+        # This will be injected from Codemagic Secrets
+        GEMINI_API_KEY: $GEMINI_API_KEY 
     scripts:
-      - name: Find and enter project root
+      - name: Find project root
         script: |
-          cd $CM_BUILD_DIR
-          echo "Current dir: $(pwd)"
-          echo "Files here:"
-          ls -la
-          # Find folder with pubspec.yaml
-          PROJECT_DIR=$(find . -name pubspec.yaml -exec dirname {} \; | head -n 1)
-          echo "Found pubspec in: $PROJECT_DIR"
-          cd $PROJECT_DIR
-          echo "Now in: $(pwd)"
+          PROJECT_DIR=$(find $CM_BUILD_DIR -name pubspec.yaml -exec dirname {} \; | head -n 1)
+          echo "Found project at: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $CM_ENV
+      
       - name: Flutter doctor
-        script: |
-          PROJECT_DIR=$(find . -name pubspec.yaml -exec dirname {} \; | head -n 1)
-          cd $PROJECT_DIR && flutter doctor -v
+        working_directory: $PROJECT_DIR
+        script: flutter doctor -v
+        
       - name: Get Flutter packages
+        working_directory: $PROJECT_DIR
+        script: flutter pub get
+        
+      - name: Build APK with API Key
+        working_directory: $PROJECT_DIR
         script: |
-          PROJECT_DIR=$(find . -name pubspec.yaml -exec dirname {} \; | head -n 1)
-          cd $PROJECT_DIR && flutter pub get
-      - name: Build APK
-        script: |
-          PROJECT_DIR=$(find . -name pubspec.yaml -exec dirname {} \; | head -n 1)
-          cd $PROJECT_DIR && flutter build apk --release
+          flutter build apk --release \
+          --dart-define=GEMINI_API_KEY=$GEMINI_API_KEY \
+          --split-per-abi # gives you 3 smaller APKs
+          
     artifacts:
       - '**/build/app/outputs/flutter-apk/*.apk'
