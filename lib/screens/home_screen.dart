@@ -17,41 +17,26 @@ import 'admin_dashboard.dart';
 import 'pdf_viewer.dart';
 import 'student_upload.dart';
 // TODO: Move this to --dart-define for production
-const String _geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
-final model = GenerativeModel(
-  model: 'gemini-3.6-flash',
-  apiKey: _geminiApiKey,
-);
+
 class Flashcard {
   final String question;
   final String answer;
-  Flashcard({
-    required this.question,
-    required this.answer,
-  });
+  Flashcard({required this.question, required this.answer});
 }
+
 // -----------------------------------------------------------------------------
 // HELPER: Auto-detect and render LaTeX without $ signs
 // -----------------------------------------------------------------------------
 
-Widget _buildMathText(
-  String text, {
-  TextStyle? style,
-  TextAlign align = TextAlign.left,
-}) {
+Widget _buildMathText(String text, {TextStyle? style, TextAlign align = TextAlign.left,}) {
   String _clean(String input) {
     String s = input;
-    // 1. Remove markdown italics/bold/code
     s = s.replaceAll(RegExp(r'\*\*|\*|`|_'), '');
-    // 2. Add space between lowercaseUppercase: MassNumber -> Mass Number
     s = s.replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (m) => '${m[1]} ${m[2]}');
-    // 3. Add space between letter and number: 6protons -> 6 protons, C12 -> C 12
     s = s.replaceAllMapped(RegExp(r'([a-zA-Z])(\d)'), (m) => '${m[1]} ${m[2]}');
     s = s.replaceAllMapped(RegExp(r'(\d)([a-zA-Z])'), (m) => '${m[1]} ${m[2]}');
-    // 4. Fix common stuck words from your screenshot
     s = s.replaceAll('Chas', 'C has ').replaceAll('has', 'has ');
     s = s.replaceAll(':', ': ');
-    // 5. Collapse multiple spaces
     s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
     return s;
   }
@@ -60,74 +45,43 @@ Widget _buildMathText(
   final List<String> lines = text.split('\n');
   for (int i = 0; i < lines.length; i++) {
     final String rawLine = lines[i];
-    final String line = _clean(rawLine).trim(); // <-- CLEANED HERE
-    if (line.isEmpty) {
-      continue;
-    }
-    final bool looksLikeMath =
-        RegExp(
-          r'[=^_]|\\frac|\\sqrt|\\alpha|\\beta|\\gamma|\\pi|\\theta|\\pm',
-        ).hasMatch(line) &&
-        line.length < 150;
+    final String line = _clean(rawLine).trim();
+    if (line.isEmpty) continue;
+    
+    final bool looksLikeMath = RegExp(r'[=^_]|\\frac|\\sqrt|\\alpha|\\beta|\\gamma|\\pi|\\theta|\\pm',).hasMatch(line) && line.length < 150;
+    
     if (looksLikeMath) {
       try {
         widgets.add(
-          SingleChildScrollView( // <-- ADDED for horizontal scroll
+          SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Center(
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Math.tex(
-                  line,
-                  mathStyle: MathStyle.display,
-                  textStyle: style?.copyWith(
-                    fontSize: (style.fontSize ?? 16) + 2,
-                  ),
-                ),
+                child: Math.tex(line, mathStyle: MathStyle.display, textStyle: style?.copyWith(fontSize: (style.fontSize ?? 16) + 2,),),
               ),
             ),
           ),
         );
       } catch (e) {
-        widgets.add(
-          SingleChildScrollView( // <-- ADDED for horizontal scroll
-            scrollDirection: Axis.horizontal,
-            child: Text(
-              line,
-              style: style,
-              textAlign: align,
-            ),
-          ),
-        );
+        widgets.add(SingleChildScrollView(scrollDirection: Axis.horizontal, child: Text(line, style: style, textAlign: align),),);
       }
     } else {
-      widgets.add(
-        SingleChildScrollView( // <-- ADDED for horizontal scroll
-          scrollDirection: Axis.horizontal,
-          child: Text(
-            line,
-            style: style,
-            textAlign: align,
-          ),
-        ),
-      );
+      widgets.add(SingleChildScrollView(scrollDirection: Axis.horizontal, child: Text(line, style: style, textAlign: align),),);
     }
-    if (i < lines.length - 1) {
-      widgets.add(const SizedBox(height: 2));
-    }
+    if (i < lines.length - 1) widgets.add(const SizedBox(height: 2));
   }
-  return Column(
-    mainAxisSize: MainAxisSize.min,
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: widgets,
-  );
+  return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: widgets,);
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final String geminiApiKey;
+  const HomeScreen({super.key, required this.geminiApiKey});
+  
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
+
 class _HomeScreenState extends State<HomeScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final TextEditingController _searchController = TextEditingController();
@@ -138,46 +92,49 @@ class _HomeScreenState extends State<HomeScreen> {
   final Set<String> ratedDocs = {};
   Set<String> favoriteDocs = {};
   Set<String> recentlyViewed = {};
-  // Values saved by StudentUploadScreen.
-  // They can be fileName, fileUrl, document ID, title, etc.
   List<String> myUploads = [];
   String _themeMode = 'light';
   int _tapCount = 0;
   DateTime? _lastTapTime;
   final List<Color> _cardColors = [
-    const Color(0xFF00C896),
-    const Color(0xFF3B82F6),
-    const Color(0xFFF59E0B),
-    const Color(0xFFEC4899),
-    const Color(0xFF8B5CF6),
+    const Color(0xFF00C896), const Color(0xFF3B82F6), const Color(0xFFF59E0B),
+    const Color(0xFFEC4899), const Color(0xFF8B5CF6),
   ];
+
+  late final GenerativeModel model; // <-- NOT nullable anymore
+
   @override
   void initState() {
     super.initState();
+    
+    // Crash here if key is missing so we know immediately
+    if (widget.geminiApiKey.isEmpty) {
+      throw Exception("GEMINI_API_KEY is missing. Build with --dart-define=GEMINI_API_KEY=your_key");
+    }
+    
+    model = GenerativeModel( // <-- guaranteed to be init
+      model: 'gemini-1.5-flash',
+      apiKey: widget.geminiApiKey,
+    );
+    
     _loadPrefs();
   }
+  
   @override
   void dispose() {
     _searchController.dispose();
     _requestController.dispose();
     super.dispose();
   }
-  // ---------------------------------------------------------------------------
-  // PREFERENCES
-  // ---------------------------------------------------------------------------
+  
   Future<void> _loadPrefs() async {
     try {
-      final SharedPreferences prefs =
-          await SharedPreferences.getInstance();
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
       if (!mounted) return;
       setState(() {
         _themeMode = prefs.getString('theme_mode') ?? 'light';
-        favoriteDocs = Set<String>.from(
-          prefs.getStringList('favorites') ?? [],
-        );
-        recentlyViewed = Set<String>.from(
-          prefs.getStringList('recent') ?? [],
-        );
+        favoriteDocs = Set<String>.from(prefs.getStringList('favorites') ?? []);
+        recentlyViewed = Set<String>.from(prefs.getStringList('recent') ?? []);
         myUploads = prefs.getStringList('my_uploads') ?? [];
       });
       await _checkTerms();
@@ -185,134 +142,84 @@ class _HomeScreenState extends State<HomeScreen> {
       debugPrint('Prefs error: $e');
     }
   }
-  // ---------------------------------------------------------------------------
-  // MY UPLOADS
-  // ---------------------------------------------------------------------------
+  
+  Future<void> _checkTerms() async { // <-- ONLY 1 DECLARATION
+    // put your terms check logic here
+    final prefs = await SharedPreferences.getInstance();
+    bool accepted = prefs.getBool('terms_accepted') ?? false;
+    if(!accepted && mounted) {
+      // show dialog
+    }
+  }
+  
   Future<void> _clearUploadHistory() async {
     try {
-      final SharedPreferences prefs =
-          await SharedPreferences.getInstance();
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.remove('my_uploads');
       if (!mounted) return;
-      setState(() {
-        myUploads.clear();
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('My Uploads history cleared'),
-        ),
-      );
+      setState(() {myUploads.clear();});
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('My Uploads history cleared')),);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not clear upload history: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not clear upload history: $e'), backgroundColor: Colors.red),);
     }
   }
-  String _normalizeUploadValue(dynamic value) {
-    return value?.toString().trim().toLowerCase() ?? '';
-  }
-  // Checks multiple identifiers so uploads remain visible
-  // whether pending, approved or rejected.
+  
+  String _normalizeUploadValue(dynamic value) => value?.toString().trim().toLowerCase() ?? '';
+  
   bool _isMyUpload(QueryDocumentSnapshot doc) {
     final dynamic rawData = doc.data();
-    if (rawData is! Map) {
-      return false;
-    }
-    final Map<String, dynamic> data =
-        Map<String, dynamic>.from(rawData);
+    if (rawData is! Map) return false;
+    final Map<String, dynamic> data = Map<String, dynamic>.from(rawData);
     final Set<String> documentIdentifiers = {
-      _normalizeUploadValue(doc.id),
-      _normalizeUploadValue(data['id']),
-      _normalizeUploadValue(data['fileName']),
-      _normalizeUploadValue(data['fileUrl']),
-      _normalizeUploadValue(data['url']),
-      _normalizeUploadValue(data['title']),
-      _normalizeUploadValue(data['uploadId']),
-      _normalizeUploadValue(data['resourceId']),
+      _normalizeUploadValue(doc.id), _normalizeUploadValue(data['id']),
+      _normalizeUploadValue(data['fileName']), _normalizeUploadValue(data['fileUrl']),
+      _normalizeUploadValue(data['url']), _normalizeUploadValue(data['title']),
+      _normalizeUploadValue(data['uploadId']), _normalizeUploadValue(data['resourceId']),
     };
-    documentIdentifiers.removeWhere(
-      (value) => value.isEmpty,
-    );
+    documentIdentifiers.removeWhere((value) => value.isEmpty);
     for (final String savedUpload in myUploads) {
-      final String normalizedSaved =
-          _normalizeUploadValue(savedUpload);
-      if (normalizedSaved.isEmpty) {
-        continue;
-      }
-      if (documentIdentifiers.contains(normalizedSaved)) {
-        return true;
-      }
+      final String normalizedSaved = _normalizeUploadValue(savedUpload);
+      if (normalizedSaved.isEmpty) continue;
+      if (documentIdentifiers.contains(normalizedSaved)) return true;
       for (final String identifier in documentIdentifiers) {
-        if (identifier == normalizedSaved) {
-          return true;
-        }
-        if (identifier.endsWith(normalizedSaved) ||
-            normalizedSaved.endsWith(identifier)) {
-          return true;
-        }
+        if (identifier == normalizedSaved) return true;
+        if (identifier.endsWith(normalizedSaved) || normalizedSaved.endsWith(identifier)) return true;
       }
     }
     return false;
   }
-  String _getUploadStatus(
-    QueryDocumentSnapshot doc, {
-    required bool isPendingCollection,
-  }) {
+  
+  String _getUploadStatus(QueryDocumentSnapshot doc, {required bool isPendingCollection,}) {
     final dynamic rawData = doc.data();
-    if (rawData is! Map) {
-      return isPendingCollection ? 'Pending' : 'Approved';
-    }
-    final Map<String, dynamic> data =
-        Map<String, dynamic>.from(rawData);
-    final dynamic rawStatus =
-        data['status'] ??
-        data['uploadStatus'] ??
-        data['reviewStatus'];
-    final String status =
-        rawStatus?.toString().trim().toLowerCase() ?? '';
-    if (status.contains('reject')) {
-      return 'Rejected';
-    }
-    if (status.contains('pending') ||
-        status.contains('review') ||
-        status.contains('waiting')) {
-      return 'Pending';
-    }
-    if (status.contains('approv')) {
-      return 'Approved';
-    }
-    if (isPendingCollection) {
-      return 'Pending';
-    }
+    if (rawData is! Map) return isPendingCollection ? 'Pending' : 'Approved';
+    final Map<String, dynamic> data = Map<String, dynamic>.from(rawData);
+    final dynamic rawStatus = data['status'] ?? data['uploadStatus'] ?? data['reviewStatus'];
+    final String status = rawStatus?.toString().trim().toLowerCase() ?? '';
+    if (status.contains('reject')) return 'Rejected';
+    if (status.contains('pending') || status.contains('review') || status.contains('waiting')) return 'Pending';
+    if (status.contains('approv')) return 'Approved';
+    if (isPendingCollection) return 'Pending';
     return 'Approved';
   }
+  
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
-      case 'approved':
-        return Colors.green;
-      case 'rejected':
-        return Colors.red;
-      case 'pending':
-      default:
-        return Colors.orange;
+      case 'approved': return Colors.green;
+      case 'rejected': return Colors.red;
+      case 'pending': default: return Colors.orange;
     }
   }
+  
   IconData _getStatusIcon(String status) {
     switch (status.toLowerCase()) {
-      case 'approved':
-        return Icons.check_circle;
-      case 'rejected':
-        return Icons.cancel;
-      case 'pending':
-      default:
-        return Icons.pending;
+      case 'approved': return Icons.check_circle;
+      case 'rejected': return Icons.cancel;
+      case 'pending': default: return Icons.pending;
     }
   }
-  // ---------------------------------------------------------------------------
+
+
   // RECENT / FAVORITES / THEME
   // ---------------------------------------------------------------------------
   Future<void> _saveRecent(String docId) async {
@@ -367,15 +274,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // ---------------------------------------------------------------------------
   // TERMS
   // ---------------------------------------------------------------------------
-  Future<void> _checkTerms() async {
-    final SharedPreferences prefs =
-        await SharedPreferences.getInstance();
-    final bool accepted =
-        prefs.getBool('terms_accepted') ?? false;
-    if (!accepted && mounted) {
-      _showTermsDialog();
-    }
-  }
+
   void _showTermsDialog() {
     showDialog(
       context: context,
@@ -2603,8 +2502,9 @@ class _MyUploadItem {
 // -----------------------------------------------------------------------------
 class _FlashcardDialog extends StatefulWidget {
   final String subject;
+  final GenerativeModel model,
   const _FlashcardDialog({
-    required this.subject,
+    required this.subject, required this.model, 
   });
   @override
   State<_FlashcardDialog> createState() =>

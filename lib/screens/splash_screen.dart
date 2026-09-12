@@ -4,7 +4,8 @@ import 'package:flutter/services.dart';
 import 'home_screen.dart';
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  final String geminiApiKey;
+  const SplashScreen({super.key, required this.geminiApiKey});
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -44,7 +45,7 @@ class _SplashScreenState extends State<SplashScreen>
       Navigator.pushReplacement(
         context,
         PageRouteBuilder(
-          pageBuilder: (_, __, ___) => const HomeScreen(),
+          pageBuilder: (_, __, ___) =>  HomeScreen(geminiApiKey: widget.geminiApiKey),
           transitionDuration: const Duration(milliseconds: 600),
           transitionsBuilder: (_, animation, __, child) {
             return FadeTransition(opacity: animation, child: child);

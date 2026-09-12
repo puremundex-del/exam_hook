@@ -8,8 +8,10 @@ import 'firebase_options.dart'; // <-- IMPORTANT: this was missing
 import 'providers/theme_provider.dart';
 import 'screens/splash_screen.dart';
 
+// 1. READ KEYS FROM --dart-define
 const supabaseUrl = 'https://fvcstahmzrfxptgeznuk.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2Y3N0YWhtenJmeHB0Z2V6bnVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2NTU5MDgsImV4cCI6MjEwNDIzMTkwOH0.qBpJhFV4g9obK3RZF2IdbE1AvWozdFLZ5KUvDvuijNw';
+const geminiApiKey = String.fromEnvironment('GEMINI_API_KEY'); // <-- ADDED
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,12 +28,17 @@ Future<void> main() async {
   Object? initializationError;
 
   try {
-    // 1. Initialize Firebase with the generated platform config.
+    // 1. Check Gemini Key first
+    if (geminiApiKey.isEmpty) {
+      throw Exception("GEMINI_API_KEY is missing. Build with --dart-define=GEMINI_API_KEY=your_key");
+    }
+
+    // 2. Initialize Firebase with the generated platform config.
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
 
-    // 2. Initialize Supabase.
+    // 3. Initialize Supabase.
     await Supabase.initialize(
       url: supabaseUrl,
       anonKey: supabaseKey,
@@ -50,15 +57,23 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
-      child: ExamHookApp(initializationError: initializationError),
+      child: ExamHookApp(
+        initializationError: initializationError,
+        geminiApiKey: geminiApiKey, // <-- ADDED: pass key down
+      ),
     ),
   );
 }
 
 class ExamHookApp extends StatelessWidget {
   final Object? initializationError;
+  final String geminiApiKey; // <-- ADDED
 
-  const ExamHookApp({super.key, this.initializationError});
+  const ExamHookApp({
+    super.key, 
+    this.initializationError,
+    required this.geminiApiKey, // <-- ADDED
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -110,7 +125,7 @@ class ExamHookApp extends StatelessWidget {
       ),
       themeMode: themeProvider.themeMode,
       home: initializationError == null
-          ? const SplashScreen()
+          ? SplashScreen(geminiApiKey: geminiApiKey) // <-- ADDED: pass to splash/home
           : StartupErrorScreen(error: initializationError!),
     );
   }
