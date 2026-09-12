@@ -1,0 +1,49 @@
+name: Build ExamHook Android
+
+on:
+  push:
+    branches: [ main ]  # builds when you push to main
+  workflow_dispatch: # lets you click "Run workflow" manually
+
+jobs:
+  build-android:
+    name: Build APK + AAB
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 'stable'
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build APK Release
+        run: flutter build apk --release --split-per-abi --dart-define=GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+
+      - name: Build AAB Release  
+        run: flutter build appbundle --release --dart-define=GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: examhook-apk
+          path: build/app/outputs/flutter-apk/*-release.apk
+
+      - name: Upload AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: examhook-aab
+          path: build/app/outputs/bundle/release/app-release.aab
