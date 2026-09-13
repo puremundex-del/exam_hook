@@ -1,23 +1,26 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'firebase_options.dart'; // <-- IMPORTANT: this was missing
+
+import 'firebase_options.dart';
 import 'providers/theme_provider.dart';
 import 'screens/splash_screen.dart';
 
-// 1. READ KEYS FROM --dart-define
-const supabaseUrl = 'https://fvcstahmzrfxptgeznuk.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2Y3N0YWhtenJmeHB0Z2V6bnVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2NTU5MDgsImV4cCI6MjEwNDIzMTkwOH0.qBpJhFV4g9obK3RZF2IdbE1AvWozdFLZ5KUvDvuijNw';
-const geminiApiKey = String.fromEnvironment('GEMINI_API_KEY'); // <-- ADDED
+const String supabaseUrl = 'https://fvcstahmzrfxptgeznuk.supabase.co';
+const String supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2Y3N0YWhtenJmeHB0Z2V6bnVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2NTU5MDgsImV4cCI6MjEwNDIzMTkwOH0.qBpJhFV4g9obK3RZF2IdbE1AvWozdFLZ5KUvDvuijNw';
+
+const String geminiApiKey = String.fromEnvironment(
+  'GEMINI_API_KEY',
+  defaultValue: '',
+);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Keep startup errors from leaving the release build on a blank screen.
-  FlutterError.onError = (details) {
+  FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
     if (kDebugMode) {
       debugPrint('Flutter Error: ${details.exception}');
@@ -25,29 +28,44 @@ Future<void> main() async {
     }
   };
 
-  Object? initializationError;
+  Object? firebaseInitializationError;
 
+  // Firebase is required by the main resource screens.
   try {
-    // 1. Check Gemini Key first
-    if (geminiApiKey.isEmpty) {
-      throw Exception("GEMINI_API_KEY is missing. Build with --dart-define=GEMINI_API_KEY=your_key");
+    if (Firebase.apps.isEmpty) {
+      try {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      } catch (e) {
+        // If generated Firebase options are unavailable/mismatched, allow the
+        // native Android Firebase configuration to initialize Firebase.
+        if (Firebase.apps.isEmpty) {
+          await Firebase.initializeApp();
+        } else {
+          rethrow;
+        }
+      }
     }
+  } catch (e, stackTrace) {
+    firebaseInitializationError = e;
+    debugPrint('Firebase initialization error: $e');
+    if (kDebugMode) {
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
 
-    // 2. Initialize Firebase with the generated platform config.
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-
-    // 3. Initialize Supabase.
+  // Supabase is used for uploads/admin storage. It must not prevent the main
+  // ExamHook application from opening if its initialization fails.
+  try {
     await Supabase.initialize(
       url: supabaseUrl,
       anonKey: supabaseKey,
       debug: kDebugMode,
     );
   } catch (e, stackTrace) {
-    initializationError = e;
+    debugPrint('Supabase initialization error: $e');
     if (kDebugMode) {
-      debugPrint('Initialization error: $e');
       debugPrintStack(stackTrace: stackTrace);
     }
   }
@@ -58,8 +76,7 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
       child: ExamHookApp(
-        initializationError: initializationError,
-        geminiApiKey: geminiApiKey, // <-- ADDED: pass key down
+        initializationError: firebaseInitializationError,
       ),
     ),
   );
@@ -67,21 +84,15 @@ Future<void> main() async {
 
 class ExamHookApp extends StatelessWidget {
   final Object? initializationError;
-  final String geminiApiKey; // <-- ADDED
 
-  const ExamHookApp({
-    super.key, 
-    this.initializationError,
-    required this.geminiApiKey, // <-- ADDED
-  });
+  const ExamHookApp({super.key, this.initializationError});
 
   @override
   Widget build(BuildContext context) {
-    final themeProvider = Provider.of<ThemeProvider>(context);
+    final ThemeProvider themeProvider = Provider.of<ThemeProvider>(context);
 
-    // Pro Green + Blue Theme as you requested
-    const Color primaryGreen = Color(0xFF00C896); // Mint Green
-    const Color secondaryBlue = Color(0xFF3B82F6); // Pro Blue
+    const Color primaryGreen = Color(0xFF00C896);
+    const Color secondaryBlue = Color(0xFF3B82F6);
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -99,18 +110,28 @@ class ExamHookApp extends StatelessWidget {
           foregroundColor: Colors.white,
           elevation: 0,
           centerTitle: true,
-          titleTextStyle: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w600),
+          titleTextStyle: GoogleFonts.poppins(
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
             backgroundColor: primaryGreen,
             foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 14,
+            ),
           ),
         ),
         cardTheme: CardThemeData(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           elevation: 2,
         ),
       ),
@@ -121,11 +142,13 @@ class ExamHookApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
-        textTheme: GoogleFonts.poppinsTextTheme(ThemeData.dark().textTheme),
+        textTheme: GoogleFonts.poppinsTextTheme(
+          ThemeData.dark().textTheme,
+        ),
       ),
       themeMode: themeProvider.themeMode,
       home: initializationError == null
-          ? SplashScreen(geminiApiKey: geminiApiKey) // <-- ADDED: pass to splash/home
+          ? SplashScreen(geminiApiKey: geminiApiKey)
           : StartupErrorScreen(error: initializationError!),
     );
   }
@@ -139,25 +162,35 @@ class StartupErrorScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, size: 56),
-              const SizedBox(height: 16),
-              const Text(
-                'Unable to start the app',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                kDebugMode ? '$error' : 'Please restart the app and try again.',
-                textAlign: TextAlign.center,
-              ),
-            ],
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.error_outline,
+                  size: 56,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Unable to start the app',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  kDebugMode
+                      ? '$error'
+                      : 'Firebase could not be initialized. Check the Android Firebase configuration.',
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
           ),
         ),
       ),

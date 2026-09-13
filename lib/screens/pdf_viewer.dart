@@ -29,14 +29,23 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   Future<void> _downloadAndOpen() async {
     try {
       final response = await http.get(Uri.parse(widget.url));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('Server returned HTTP ${response.statusCode}');
+      }
       final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/${widget.title}.pdf');
-      await file.writeAsBytes(response.bodyBytes);
+      final safeTitle = widget.title
+          .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+          .trim();
+      final fileName = safeTitle.isEmpty ? 'document' : safeTitle;
+      final file = File('${dir.path}/$fileName.pdf');
+      await file.writeAsBytes(response.bodyBytes, flush: true);
+      if (!mounted) return;
       setState(() {
         localPath = file.path;
         isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load PDF: $e')));
     }

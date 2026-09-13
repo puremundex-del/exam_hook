@@ -44,12 +44,22 @@ class _AdminDashboardState extends State<AdminDashboard>
     _loadSettings();
   }
 
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _titleController.dispose();
+    _newSubjectController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadSettings() async {
     try {
       DocumentReference settingsRef =
           firestore.collection('settings').doc('app');
       DocumentSnapshot doc = await settingsRef.get();
       if (doc.exists) {
+        if (!mounted) return;
         var data = doc.data() as Map<String, dynamic>?;
         if (data != null && data['subjects'] != null) {
           setState(() {
@@ -74,7 +84,7 @@ class _AdminDashboardState extends State<AdminDashboard>
       withData: true,
     );
 
-    if (result != null) {
+    if (result != null && mounted) {
       setState(() {
         _fileBytes = result.files.first.bytes;
         _fileName = result.files.first.name;
@@ -96,6 +106,7 @@ class _AdminDashboardState extends State<AdminDashboard>
 
     String uniqueFileName = '${uuid.v4()}_$_fileName';
 
+    if (!mounted) return;
     setState(() => _isUploading = true);
 
     try {
@@ -145,7 +156,9 @@ class _AdminDashboardState extends State<AdminDashboard>
       );
     }
 
-    setState(() => _isUploading = false);
+    if (mounted) {
+      setState(() => _isUploading = false);
+    }
   }
 
   Future<void> _deleteResource(String docId, String fileName) async {

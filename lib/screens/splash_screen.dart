@@ -41,6 +41,7 @@ class _SplashScreenState extends State<SplashScreen>
 
     // Go to HomeScreen after 3 seconds
     Future.delayed(const Duration(seconds: 3), () {
+      if (!mounted) return;
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       Navigator.pushReplacement(
         context,

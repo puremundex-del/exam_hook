@@ -12,7 +12,6 @@ import 'package:flutter_math_fork/flutter_math.dart';
 import 'dart:convert';
 import 'package:flutter/services.dart'; // for Clipboard
 import 'dart:typed_data';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'admin_dashboard.dart';
 import 'pdf_viewer.dart';
 import 'student_upload.dart';
@@ -101,21 +100,23 @@ class _HomeScreenState extends State<HomeScreen> {
     const Color(0xFFEC4899), const Color(0xFF8B5CF6),
   ];
 
-  late final GenerativeModel model; // <-- NOT nullable anymore
+  GenerativeModel? model;
 
   @override
   void initState() {
     super.initState();
     
-    // Crash here if key is missing so we know immediately
-    if (widget.geminiApiKey.isEmpty) {
-      throw Exception("GEMINI_API_KEY is missing. Build with --dart-define=GEMINI_API_KEY=your_key");
+    // AI is optional at startup. A missing API key must not prevent the
+    // main ExamHook app from opening.
+    final String apiKey = widget.geminiApiKey.trim();
+    if (apiKey.isNotEmpty) {
+      model = GenerativeModel(
+        model: 'gemini-3.6-flash',
+        apiKey: apiKey,
+      );
+    } else {
+      debugPrint('Gemini API key not supplied; AI features are disabled.');
     }
-    
-    model = GenerativeModel( // <-- FIXED MODEL NAME
-      model: 'gemini-3.6-flash',
-      apiKey: widget.geminiApiKey,
-    );
     
     _loadPrefs();
   }
@@ -463,6 +464,19 @@ class _HomeScreenState extends State<HomeScreen> {
     String pdfUrl,
     String title,
   ) async {
+    final GenerativeModel? aiModel = model;
+    if (aiModel == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('AI is not configured. Please add the Gemini API key.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -498,7 +512,7 @@ Rules:
         pdfBytes,
       );
       final GenerateContentResponse result =
-          await model.generateContent(
+          await aiModel.generateContent(
         [
           Content.multi([
             prompt,
@@ -680,21 +694,43 @@ Rules:
   // GEMINI
   // ---------------------------------------------------------------------------
   void _showGeminiChat() {
+    final GenerativeModel? aiModel = model;
+    if (aiModel == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('AI is not configured. Please add the Gemini API key.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true, 
-      builder: (_) => _GeminiChatSheet(model: model), // <-- FIXED: PASS MODEL
+      builder: (_) => _GeminiChatSheet(model: aiModel), // <-- FIXED: PASS MODEL
     );
   }
   void _showFlashcards(String subject) {
+    final GenerativeModel? aiModel = model;
+    if (aiModel == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('AI is not configured. Please add the Gemini API key.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) {
         return _FlashcardDialog( // <-- FIXED: PASS MODEL
           subject: subject,
-          model: model,
+          model: aiModel,
         );
       },
     );
