@@ -11,8 +11,7 @@
     <application
         android:label="ExamHook"
         android:name="${applicationName}"
-        android:icon="@mipmap/logo"
-        android:usesCleartextTraffic="true">
+        android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
             android:exported="true"

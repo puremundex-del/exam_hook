@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.example.exam_hook"
-    compileSdk = 36
+    compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -30,16 +30,12 @@ android {
     }
 
     buildTypes {
-    release {
-        signingConfig = signingConfigs.getByName("debug") // remove for real release
-        isMinifyEnabled = true
-        isShrinkResources = true
-        proguardFiles(
-            getDefaultProguardFile("proguard-android-optimize.txt"),
-            "proguard-rules.pro"
-        )
+        release {
+            // TODO: Add your own signing config for the release build.
+            // Signing with the debug keys for now, so `flutter run --release` works.
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
-}
 }
 
 kotlin {
