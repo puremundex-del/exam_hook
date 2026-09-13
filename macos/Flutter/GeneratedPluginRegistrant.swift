@@ -7,7 +7,7 @@ import Foundation
 
 import app_links
 import cloud_firestore
-import file_picker_darwin
+import file_picker
 import file_selector_macos
 import firebase_core
 import share_plus
