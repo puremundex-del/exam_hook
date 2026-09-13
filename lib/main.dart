@@ -32,21 +32,9 @@ Future<void> main() async {
 
   // Firebase is required by the main resource screens.
   try {
-    if (Firebase.apps.isEmpty) {
-      try {
-        await Firebase.initializeApp(
-          options: DefaultFirebaseOptions.currentPlatform,
-        );
-      } catch (e) {
-        // If generated Firebase options are unavailable/mismatched, allow the
-        // native Android Firebase configuration to initialize Firebase.
-        if (Firebase.apps.isEmpty) {
-          await Firebase.initializeApp();
-        } else {
-          rethrow;
-        }
-      }
-    }
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
   } catch (e, stackTrace) {
     firebaseInitializationError = e;
     debugPrint('Firebase initialization error: $e');
