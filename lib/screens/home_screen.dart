@@ -10,6 +10,7 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/services.dart'; // for Clipboard
 import 'dart:typed_data';
 import 'admin_dashboard.dart';
@@ -20,7 +21,57 @@ import 'student_upload.dart';
 class Flashcard {
   final String question;
   final String answer;
-  Flashcard({required this.question, required this.answer});
+  final List<String> options;
+  final int correctIndex;
+
+  Flashcard({
+    required this.question,
+    required this.answer,
+    this.options = const [],
+    this.correctIndex = 0,
+  });
+}
+
+void _showSimpleToast(BuildContext context, {required bool success}) {
+  final overlay = Overlay.maybeOf(context);
+  if (overlay == null) return;
+  late OverlayEntry entry;
+  entry = OverlayEntry(
+    builder: (_) => Positioned(
+      left: 24,
+      right: 24,
+      bottom: MediaQuery.of(context).viewInsets.bottom + 28,
+      child: IgnorePointer(
+        child: Material(
+          color: Colors.transparent,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+              decoration: BoxDecoration(
+                color: success ? Colors.green.shade600 : Colors.red.shade600,
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: const [
+                  BoxShadow(blurRadius: 12, offset: Offset(0, 5), color: Colors.black26),
+                ],
+              ),
+              child: Text(
+                success ? 'Successful!' : 'Something went wrong!',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  overlay.insert(entry);
+  Future.delayed(const Duration(seconds: 2), () {
+    if (entry.mounted) entry.remove();
+  });
 }
 
 // -----------------------------------------------------------------------------
@@ -63,14 +114,96 @@ Widget _buildMathText(String text, {TextStyle? style, TextAlign align = TextAlig
           ),
         );
       } catch (e) {
-        widgets.add(SingleChildScrollView(scrollDirection: Axis.horizontal, child: Text(line, style: style, textAlign: align),),);
+        widgets.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Text(
+            line,
+            style: style?.copyWith(height: 1.6),
+            textAlign: align,
+            softWrap: true,
+          ),
+        ),
+      );
       }
     } else {
-      widgets.add(SingleChildScrollView(scrollDirection: Axis.horizontal, child: Text(line, style: style, textAlign: align),),);
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Text(
+            line,
+            style: style?.copyWith(height: 1.6),
+            textAlign: align,
+            softWrap: true,
+          ),
+        ),
+      );
     }
     if (i < lines.length - 1) widgets.add(const SizedBox(height: 2));
   }
   return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: widgets,);
+}
+
+class _MarqueeText extends StatefulWidget {
+  final String text;
+  final TextStyle style;
+  const _MarqueeText({required this.text, required this.style});
+
+  @override
+  State<_MarqueeText> createState() => _MarqueeTextState();
+}
+
+class _MarqueeTextState extends State<_MarqueeText> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 22),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (_, constraints) {
+        return ClipRect(
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (_, __) {
+              final width = constraints.maxWidth;
+              final dx = -(width * _controller.value);
+              return Transform.translate(
+                offset: Offset(dx, 0),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: SizedBox(
+                    width: width * 2,
+                    child: Center(
+                      child: Text(
+                        '${widget.text}     ✦     ${widget.text}',
+                        maxLines: 2,
+                        overflow: TextOverflow.clip,
+                        style: widget.style,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
 }
 
 class HomeScreen extends StatefulWidget {
@@ -101,6 +234,8 @@ class _HomeScreenState extends State<HomeScreen> {
   ];
 
   GenerativeModel? model;
+  List<Map<String, String>> _dailyQuotes = [];
+  bool _quotesLoading = true;
 
   @override
   void initState() {
@@ -119,6 +254,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     
     _loadPrefs();
+    _loadDailyQuotes();
   }
   
   @override
@@ -128,6 +264,109 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
   
+  // ---------------------------------------------------------------------------
+  // SIMPLE TOAST + DAILY CLOUD MOTIVATION
+  // ---------------------------------------------------------------------------
+  void _showToast({required bool success}) {
+    if (!mounted) return;
+    final OverlayState? overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => Positioned(
+        left: 24,
+        right: 24,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 28,
+        child: IgnorePointer(
+          child: Material(
+            color: Colors.transparent,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                decoration: BoxDecoration(
+                  color: success ? Colors.green.shade600 : Colors.red.shade600,
+                  borderRadius: BorderRadius.circular(28),
+                  boxShadow: const [
+                    BoxShadow(blurRadius: 12, offset: Offset(0, 5), color: Colors.black26),
+                  ],
+                ),
+                child: Text(
+                  success ? 'Successful!' : 'Something went wrong!',
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(entry);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (entry.mounted) entry.remove();
+    });
+  }
+
+  Future<void> _loadDailyQuotes() async {
+    try {
+      final snapshot = await _firestore.collection('motivation_quotes').get();
+      final List<Map<String, String>> quotes = snapshot.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'quote': data['quote']?.toString() ?? data['text']?.toString() ?? '',
+          'author': data['author']?.toString() ?? data['writer']?.toString() ?? 'Unknown',
+        };
+      }).where((q) => q['quote']!.trim().isNotEmpty).toList();
+
+      if (quotes.isEmpty) throw Exception('No motivation quotes found');
+
+      // Deterministic daily shuffle: all users see the same two shuffled quotes
+      // for a given date, while the selection changes automatically each day.
+      final now = DateTime.now();
+      final seed = now.year * 10000 + now.month * 100 + now.day;
+      quotes.shuffle(math.Random(seed));
+      if (!mounted) return;
+      setState(() {
+        _dailyQuotes = quotes.take(math.min(2, quotes.length)).toList();
+        _quotesLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Daily quotes error: $e');
+      if (!mounted) return;
+      setState(() => _quotesLoading = false);
+    }
+  }
+
+  Widget _buildDailyQuotesMarquee(bool isDark) {
+    if (_quotesLoading || _dailyQuotes.isEmpty) return const SizedBox.shrink();
+    final text = _dailyQuotes
+        .map((q) => '“${q['quote']}” — ${q['author']}')
+        .join('     ✦     ');
+    return Container(
+      height: 58,
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF00C896), Color(0xFF3B82F6), Color(0xFF8B5CF6)],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [BoxShadow(blurRadius: 10, offset: Offset(0, 4), color: Colors.black12)],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: _MarqueeText(
+        text: text,
+        style: GoogleFonts.poppins(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
   Future<void> _loadPrefs() async {
     try {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -159,10 +398,10 @@ class _HomeScreenState extends State<HomeScreen> {
       await prefs.remove('my_uploads');
       if (!mounted) return;
       setState(() {myUploads.clear();});
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('My Uploads history cleared')),);
+      _showToast(success: true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not clear upload history: $e'), backgroundColor: Colors.red),);
+      _showToast(success: false);
     }
   }
   
@@ -372,20 +611,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     Navigator.pop(dialogContext);
                   }
                   if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Request sent to Admin!'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
+                  _showToast(success: true);
                 } catch (e) {
                   if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Failed to send: $e'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
+                  _showToast(success: false);
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -404,18 +633,24 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _openResource(
     String docId,
     String url,
-    String title,
-  ) async {
+    String title, {
+    bool countDownload = true,
+  }) async {
     await _saveRecent(docId);
-    try {
-      await _firestore
-          .collection('resources')
-          .doc(docId)
-          .update({
-        'downloads': FieldValue.increment(1),
-      });
-    } catch (e) {
-      debugPrint('Download counter error: $e');
+    if (countDownload) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final key = 'resource_download_counted_$docId';
+        final alreadyCounted = prefs.getBool(key) ?? false;
+        if (!alreadyCounted) {
+          await _firestore.collection('resources').doc(docId).update({
+            'downloads': FieldValue.increment(1),
+          });
+          await prefs.setBool(key, true);
+        }
+      } catch (e) {
+        debugPrint('Download counter error: $e');
+      }
     }
     if (!mounted) return;
     try {
@@ -426,6 +661,9 @@ class _HomeScreenState extends State<HomeScreen> {
             uri,
             mode: LaunchMode.externalApplication,
           );
+          _showToast(success: true);
+        } else {
+          _showToast(success: false);
         }
         return;
       }
@@ -439,22 +677,19 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         );
+        _showToast(success: true);
       } else {
         if (await canLaunchUrl(uri)) {
           await launchUrl(
             uri,
             mode: LaunchMode.externalApplication,
           );
+          _showToast(success: true);
         }
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not open file: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _showToast(success: false);
     }
   }
   // ---------------------------------------------------------------------------
@@ -467,12 +702,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final GenerativeModel? aiModel = model;
     if (aiModel == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('AI is not configured. Please add the Gemini API key.'),
-            backgroundColor: Colors.orange,
-          ),
-        );
+        _showToast(success: false);
       }
       return;
     }
@@ -499,12 +729,15 @@ class _HomeScreenState extends State<HomeScreen> {
       final Uint8List pdfBytes = response.bodyBytes;
       final TextPart prompt = TextPart(
         r'''
-Generate 10 flashcards from this PDF for high school exam prep.
+Generate 10 multiple-choice flashcards from this PDF for high school exam prep.
 Rules:
 1. Return ONLY a valid JSON array. No markdown, no asterisks, no explanation.
-2. Format: [{"q": "question", "a": "answer"}]
-3. For formulas write them in plain LaTeX without $ signs. Example: F = ma, E = mc^2, \frac{a}{b}, x^2
-4. Keep answers short, max 15 words.
+2. Format: [{"q":"question","a":"correct answer","options":["option 1","option 2","option 3","option 4"],"correctIndex":0}]
+3. Every card MUST have exactly 4 distinct options.
+4. One option MUST exactly match the correct answer in "a".
+5. correctIndex is the zero-based index of the correct option.
+6. For formulas write them in plain LaTeX without $ signs. Example: F = ma, E = mc^2, \frac{a}{b}, x^2
+7. Keep answers short, max 15 words.
 ''',
       );
       final DataPart pdfData = DataPart(
@@ -541,6 +774,12 @@ Rules:
             (e) => Flashcard(
               question: e['q']?.toString() ?? '',
               answer: e['a']?.toString() ?? '',
+              options: e['options'] is List
+                  ? List<String>.from((e['options'] as List).map((v) => v.toString()))
+                  : const [],
+              correctIndex: e['correctIndex'] is int
+                  ? e['correctIndex'] as int
+                  : int.tryParse(e['correctIndex']?.toString() ?? '') ?? 0,
             ),
           )
           .where(
@@ -553,28 +792,21 @@ Rules:
         throw Exception('No flashcards were generated');
       }
       if (!mounted) return;
-      showDialog(
-        context: context,
-        builder: (_) {
-          return _FlashcardDialogFromList(
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => _FlashcardDialogFromList(
             cards: cards,
             title: title,
-          );
-        },
+          ),
+        ),
       );
     } catch (e) {
       if (mounted && !dialogClosed) {
         Navigator.pop(context);
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Failed to generate flashcards: $e',
-            ),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showToast(success: false);
       }
     }
   }
@@ -585,8 +817,9 @@ Rules:
     String title,
     String url,
   ) {
+    // Do not expose the Supabase storage/bucket URL in the user-facing share text.
     Share.share(
-      'Check out "$title" on ExamHook\n$url',
+      'Check out "$title" on ExamHook',
     );
   }
   Future<void> _likeResource(String docId) async {
@@ -682,12 +915,7 @@ Rules:
           builder: (_) => const AdminDashboard(),
         ),
       );
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Admin Access Granted'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      _showToast(success: true);
     }
   }
   // ---------------------------------------------------------------------------
@@ -696,43 +924,32 @@ Rules:
   void _showGeminiChat() {
     final GenerativeModel? aiModel = model;
     if (aiModel == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('AI is not configured. Please add the Gemini API key.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      _showToast(success: false);
       return;
     }
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true, 
-      builder: (_) => _GeminiChatSheet(model: aiModel), // <-- FIXED: PASS MODEL
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _GeminiChatSheet(model: aiModel),
+      ),
     );
   }
   void _showFlashcards(String subject) {
     final GenerativeModel? aiModel = model;
     if (aiModel == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('AI is not configured. Please add the Gemini API key.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      _showToast(success: false);
       return;
     }
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) {
-        return _FlashcardDialog( // <-- FIXED: PASS MODEL
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _FlashcardDialog(
           subject: subject,
           model: aiModel,
-        );
-      },
+        ),
+      ),
     );
   }
   // ---------------------------------------------------------------------------
@@ -1205,6 +1422,7 @@ Rules:
                                     doc.id,
                                     fileUrl,
                                     title,
+                                    countDownload: false,
                                   ),
                                 ),
                             ],
@@ -1680,6 +1898,7 @@ Rules:
             // -----------------------------------------------------------------
             body: Column(
               children: [
+                _buildDailyQuotesMarquee(isDark),
                 Padding(
                   padding:
                       const EdgeInsets.all(
@@ -2539,351 +2758,455 @@ class _MyUploadItem {
 class _FlashcardDialog extends StatefulWidget {
   final String subject;
   final GenerativeModel model;
-  const _FlashcardDialog({
-    super.key, required this.subject, required this.model, 
-  });
+  const _FlashcardDialog({super.key, required this.subject, required this.model});
+
   @override
-  State<_FlashcardDialog> createState() =>
-      _FlashcardDialogState();
+  State<_FlashcardDialog> createState() => _FlashcardDialogState();
 }
-class _FlashcardDialogState
-    extends State<_FlashcardDialog> {
+
+class _FlashcardDialogState extends State<_FlashcardDialog> {
   List<Flashcard> _cards = [];
   bool _isLoading = true;
   int _index = 0;
-  bool _showAnswer = false;
+  int? _selectedOption;
+
+  void _toast(bool success) {
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => Positioned(
+        left: 24,
+        right: 24,
+        bottom: 30,
+        child: Material(
+          color: Colors.transparent,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+              decoration: BoxDecoration(
+                color: success ? Colors.green.shade600 : Colors.red.shade600,
+                borderRadius: BorderRadius.circular(28),
+              ),
+              child: Text(
+                success ? 'Successful!' : 'Something went wrong!',
+                style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(entry);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (entry.mounted) entry.remove();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
     _generate();
   }
+
   Future<void> _generate() async {
     try {
-      final String prompt =
-          '''
-Generate 20 flashcards for ${widget.subject} for high school exams.
+      final String prompt = '''
+Generate 20 multiple-choice flashcards for ${widget.subject} for high school exams.
 Rules:
 1. Return ONLY a valid JSON array. No markdown, no asterisks, no explanation.
-2. Format: [{"q": "question", "a": "answer"}]
-3. For formulas write them in plain LaTeX without \$ signs. Example: F = ma, E = mc^2, \\frac{a}{b}, x^2
-4. Keep answers short, max 15 words.
+2. Format: [{"q":"question","a":"correct answer","options":["option 1","option 2","option 3","option 4"],"correctIndex":0}]
+3. Every card MUST have exactly 4 distinct options.
+4. One option MUST exactly match the correct answer in "a".
+5. correctIndex is the zero-based index of that correct option.
+6. For formulas write them in plain LaTeX without \$ signs. Example: F = ma, E = mc^2, \\\\frac{a}{b}, x^2
+7. Keep answers short, max 15 words.
 ''';
-      final GenerateContentResponse response =
-          await widget.model.generateContent([ // <-- FIXED: widget.model
-        Content.text(prompt),
-      ]);
-      String text = response.text ?? '';
-      text = text
-          .replaceAll('```json', '')
-          .replaceAll('```', '')
-          .trim();
-      final dynamic decoded = jsonDecode(text);
-      if (decoded is! List) {
-        throw Exception(
-          'Invalid AI response',
+      final response = await widget.model.generateContent([Content.text(prompt)]);
+      var text = response.text ?? '';
+      text = text.replaceAll('```json', '').replaceAll('```', '').trim();
+      final decoded = jsonDecode(text);
+      if (decoded is! List) throw Exception('Invalid AI response');
+
+      final cards = decoded.whereType<Map>().map((e) {
+        final options = e['options'] is List
+            ? List<String>.from((e['options'] as List).map((v) => v.toString()))
+            : <String>[];
+        return Flashcard(
+          question: e['q']?.toString() ?? '',
+          answer: e['a']?.toString() ?? '',
+          options: options,
+          correctIndex: e['correctIndex'] is int
+              ? e['correctIndex'] as int
+              : int.tryParse(e['correctIndex']?.toString() ?? '') ?? 0,
         );
-      }
-      final List<Flashcard> cards = decoded
-          .whereType<Map>()
-          .map(
-            (e) => Flashcard(
-              question:
-                  e['q']?.toString() ?? '',
-              answer:
-                  e['a']?.toString() ?? '',
-            ),
-          )
-          .where(
-            (card) =>
-                card.question.isNotEmpty &&
-                card.answer.isNotEmpty,
-          )
-          .toList();
+      }).where((card) =>
+          card.question.isNotEmpty &&
+          card.answer.isNotEmpty &&
+          card.options.length == 4 &&
+          card.correctIndex >= 0 &&
+          card.correctIndex < 4).toList();
+
       if (!mounted) return;
       setState(() {
         _cards = cards;
         _isLoading = false;
       });
+      if (cards.isEmpty) _toast(false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
+      _toast(false);
     }
   }
+
+  void _selectOption(int option) {
+    if (_selectedOption != null) return;
+    final card = _cards[_index];
+    setState(() => _selectedOption = option);
+    _toast(option == card.correctIndex);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      child: Container(
-        height: 400,
-        padding: const EdgeInsets.all(16),
-        child: _isLoading
-            ? const Center(
-                child:
-                    CircularProgressIndicator(),
-              )
-            : _cards.isEmpty
-                ? Center(
-                    child: Text(
-                      'Could not generate flashcards.',
-                      style:
-                          GoogleFonts.poppins(),
-                    ),
-                  )
-                : Column(
-                    children: [
-                      Text(
-                        '${widget.subject} Flashcards',
-                        style:
-                            GoogleFonts.poppins(
-                          fontSize: 20,
-                          fontWeight:
-                              FontWeight.bold,
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('${widget.subject} Flashcards', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        backgroundColor: const Color(0xFF00C896),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _cards.isEmpty
+              ? Center(child: Text('Could not generate flashcards.', style: GoogleFonts.poppins()))
+              : SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: Column(
+                      children: [
+                        LinearProgressIndicator(
+                          value: (_index + 1) / _cards.length,
+                          minHeight: 7,
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                      ),
-                      const SizedBox(
-                        height: 20,
-                      ),
-                      Expanded(
-                        child:
-                            GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _showAnswer =
-                                  !_showAnswer;
-                            });
-                          },
-                          child: Card(
-                            color:
-                                const Color(
-                              0xFF00C896,
-                            ),
-                            child: Center(
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets
-                                        .all(
-                                  20,
-                                ),
-                                child:
-                                    _buildMathText(
-                                  _showAnswer
-                                      ? _cards[
-                                          _index]
-                                          .answer
-                                      : _cards[
-                                          _index]
-                                          .question,
-                                  style:
-                                      GoogleFonts
-                                          .poppins(
-                                    fontSize:
-                                        22,
-                                    color:
-                                        Colors
-                                            .white,
+                        const SizedBox(height: 16),
+                        Text('Question ${_index + 1} of ${_cards.length}',
+                            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 12),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Card(
+                                  elevation: 3,
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(22),
+                                    child: _buildMathText(
+                                      _cards[_index].question,
+                                      style: GoogleFonts.poppins(fontSize: 21, fontWeight: FontWeight.w600),
+                                      align: TextAlign.center,
+                                    ),
                                   ),
-                                  align:
-                                      TextAlign
-                                          .center,
                                 ),
+                                const SizedBox(height: 18),
+                                ...List.generate(4, (i) {
+                                  final card = _cards[_index];
+                                  final selected = _selectedOption == i;
+                                  final correct = i == card.correctIndex;
+                                  Color? fill;
+                                  Color border = Theme.of(context).colorScheme.outline;
+                                  if (_selectedOption != null) {
+                                    if (correct) {
+                                      fill = Colors.green.shade100;
+                                      border = Colors.green;
+                                    } else if (selected) {
+                                      fill = Colors.red.shade100;
+                                      border = Colors.red;
+                                    }
+                                  }
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: InkWell(
+                                      onTap: () => _selectOption(i),
+                                      borderRadius: BorderRadius.circular(14),
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 180),
+                                        padding: const EdgeInsets.all(16),
+                                        decoration: BoxDecoration(
+                                          color: fill,
+                                          border: Border.all(color: border, width: 2),
+                                          borderRadius: BorderRadius.circular(14),
+                                        ),
+                                        child: Row(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            CircleAvatar(radius: 15, child: Text(String.fromCharCode(65 + i))),
+                                            const SizedBox(width: 12),
+                                            Expanded(child: _buildMathText(card.options[i], style: GoogleFonts.poppins(fontSize: 16))),
+                                            if (_selectedOption != null && correct)
+                                              const Icon(Icons.check_circle, color: Colors.green),
+                                            if (selected && !correct)
+                                              const Icon(Icons.cancel, color: Colors.red),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: _index > 0
+                                    ? () => setState(() {
+                                          _index--;
+                                          _selectedOption = null;
+                                        })
+                                    : null,
+                                child: const Text('Previous'),
                               ),
                             ),
-                          ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: _index < _cards.length - 1
+                                    ? () => setState(() {
+                                          _index++;
+                                          _selectedOption = null;
+                                        })
+                                    : () => Navigator.pop(context),
+                                child: Text(_index < _cards.length - 1 ? 'Next' : 'Finish'),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      Row(
-                        mainAxisAlignment:
-                            MainAxisAlignment
-                                .spaceBetween,
-                        children: [
-                          TextButton(
-                            onPressed:
-                                _index > 0
-                                    ? () {
-                                        setState(
-                                          () {
-                                            _index--;
-                                            _showAnswer =
-                                                false;
-                                          },
-                                        );
-                                      }
-                                    : null,
-                            child:
-                                const Text(
-                              'Prev',
-                            ),
-                          ),
-                          Text(
-                            '${_index + 1}/${_cards.length}',
-                          ),
-                          TextButton(
-                            onPressed:
-                                _index <
-                                        _cards.length -
-                                            1
-                                    ? () {
-                                        setState(
-                                          () {
-                                            _index++;
-                                            _showAnswer =
-                                                false;
-                                          },
-                                        );
-                                      }
-                                    : null,
-                            child:
-                                const Text(
-                              'Next',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-      ),
+                ),
     );
   }
 }
+
 // -----------------------------------------------------------------------------
 // FLASHCARD DIALOG FROM PDF
 // -----------------------------------------------------------------------------
-class _FlashcardDialogFromList
-    extends StatefulWidget {
+class _FlashcardDialogFromList extends StatefulWidget {
   final List<Flashcard> cards;
   final String title;
   const _FlashcardDialogFromList({
     required this.cards,
     required this.title,
   });
+
   @override
-  State<_FlashcardDialogFromList> createState() =>
-      _FlashcardDialogFromListState();
+  State<_FlashcardDialogFromList> createState() => _FlashcardDialogFromListState();
 }
-class _FlashcardDialogFromListState
-    extends State<_FlashcardDialogFromList> {
+
+class _FlashcardDialogFromListState extends State<_FlashcardDialogFromList> {
   int _index = 0;
-  bool _showAnswer = false;
+  int? _selectedOption;
+
+  void _selectOption(int index) {
+    if (_selectedOption != null) return;
+    setState(() => _selectedOption = index);
+    final card = widget.cards[_index];
+    final correct = index == card.correctIndex;
+    // Use the app's simple toast rather than a snackbar.
+    if (correct) {
+      _showToast(success: true);
+    } else {
+      _showToast(success: false);
+    }
+  }
+
+  void _showToast({required bool success}) {
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => Positioned(
+        left: 24,
+        right: 24,
+        bottom: 32,
+        child: Material(
+          color: Colors.transparent,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+              decoration: BoxDecoration(
+                color: success ? Colors.green.shade600 : Colors.red.shade600,
+                borderRadius: BorderRadius.circular(28),
+              ),
+              child: Text(
+                success ? 'Successful!' : 'Something went wrong!',
+                style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(entry);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (entry.mounted) entry.remove();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.cards.isEmpty) {
-      return const Dialog(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'No flashcards available.',
-          ),
-        ),
+      return Scaffold(
+        appBar: AppBar(title: const Text('Flashcards')),
+        body: const Center(child: Text('No flashcards available.')),
       );
     }
-    return Dialog(
-      child: Container(
-        height: 400,
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Text(
-              'Flashcards from: ${widget.title}',
-              maxLines: 2,
-              overflow:
-                  TextOverflow.ellipsis,
-              style: GoogleFonts.poppins(
-                fontSize: 18,
-                fontWeight:
-                    FontWeight.bold,
+    final card = widget.cards[_index];
+    final hasOptions = card.options.length == 4;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'Flashcards: ${widget.title}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: const Color(0xFF00C896),
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            children: [
+              LinearProgressIndicator(
+                value: (_index + 1) / widget.cards.length,
+                minHeight: 7,
+                borderRadius: BorderRadius.circular(8),
               ),
-            ),
-            const SizedBox(
-              height: 20,
-            ),
-            Expanded(
-              child: GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _showAnswer =
-                        !_showAnswer;
-                  });
-                },
-                child: Card(
-                  color:
-                      const Color(0xFF00C896),
-                  child: Center(
-                    child: Padding(
-                      padding:
-                          const EdgeInsets
-                              .all(
-                        20,
-                      ),
-                      child: _buildMathText(
-                        _showAnswer
-                            ? widget
-                                .cards[
-                                    _index]
-                                .answer
-                            : widget
-                                .cards[
-                                    _index]
-                                .question,
-                        style:
-                            GoogleFonts.poppins(
-                          fontSize: 22,
-                          color:
-                              Colors.white,
+              const SizedBox(height: 18),
+              Text(
+                'Question ${_index + 1} of ${widget.cards.length}',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 14),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Card(
+                        elevation: 3,
+                        child: Padding(
+                          padding: const EdgeInsets.all(22),
+                          child: _buildMathText(
+                            card.question,
+                            style: GoogleFonts.poppins(
+                              fontSize: 21,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            align: TextAlign.center,
+                          ),
                         ),
-                        align:
-                            TextAlign.center,
                       ),
-                    ),
+                      const SizedBox(height: 18),
+                      if (hasOptions)
+                        ...List.generate(4, (i) {
+                          final selected = _selectedOption == i;
+                          final correct = i == card.correctIndex;
+                          Color? fill;
+                          Color border = Theme.of(context).colorScheme.outline;
+                          if (_selectedOption != null) {
+                            if (correct) {
+                              fill = Colors.green.shade100;
+                              border = Colors.green;
+                            } else if (selected) {
+                              fill = Colors.red.shade100;
+                              border = Colors.red;
+                            }
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: InkWell(
+                              onTap: () => _selectOption(i),
+                              borderRadius: BorderRadius.circular(14),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: fill,
+                                  border: Border.all(color: border, width: 2),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 15,
+                                      child: Text(String.fromCharCode(65 + i)),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: _buildMathText(
+                                        card.options[i],
+                                        style: GoogleFonts.poppins(fontSize: 16),
+                                      ),
+                                    ),
+                                    if (_selectedOption != null && correct)
+                                      const Icon(Icons.check_circle, color: Colors.green),
+                                    if (_selectedOption == i && !correct)
+                                      const Icon(Icons.cancel, color: Colors.red),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        })
+                      else
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(
+                            'This flashcard was generated without four choices. Please regenerate it.',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.poppins(),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),
-            ),
-            Row(
-              mainAxisAlignment:
-                  MainAxisAlignment
-                      .spaceBetween,
-              children: [
-                TextButton(
-                  onPressed:
-                      _index > 0
-                          ? () {
-                              setState(
-                                () {
-                                  _index--;
-                                  _showAnswer =
-                                      false;
-                                },
-                              );
-                            }
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _index > 0
+                          ? () => setState(() {
+                                _index--;
+                                _selectedOption = null;
+                              })
                           : null,
-                  child:
-                      const Text('Prev'),
-                ),
-                Text(
-                  '${_index + 1}/${widget.cards.length}',
-                ),
-                TextButton(
-                  onPressed:
-                      _index <
-                              widget.cards.length -
-                                  1
-                          ? () {
-                              setState(
-                                () {
-                                  _index++;
-                                  _showAnswer =
-                                      false;
-                                },
-                              );
-                            }
-                          : null,
-                  child:
-                      const Text('Next'),
-                ),
-              ],
-            ),
-          ],
+                      child: const Text('Previous'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _index < widget.cards.length - 1
+                          ? () => setState(() {
+                                _index++;
+                                _selectedOption = null;
+                              })
+                          : () => Navigator.pop(context),
+                      child: Text(_index < widget.cards.length - 1 ? 'Next' : 'Finish'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2893,101 +3216,183 @@ class _FlashcardDialogFromListState
 // -----------------------------------------------------------------------------
 // GEMINI CHAT
 // -----------------------------------------------------------------------------
-// Conversation is persisted for 24 hours using SharedPreferences.
-// After 24 hours the stored conversation is automatically removed.
+// Full-screen AI tutor. Conversation is persisted for 24 hours.
 // -----------------------------------------------------------------------------
-  // ---------------------------------------------------------------------------
-class _GeminiChatSheet
-    extends StatefulWidget {
-  final GenerativeModel model; // <-- ADD THIS
-  const _GeminiChatSheet({super.key, required this.model}); // <-- ADD THIS
+class _GeminiChatSheet extends StatefulWidget {
+  final GenerativeModel model;
+
+  const _GeminiChatSheet({super.key, required this.model});
+
   @override
-  State<_GeminiChatSheet> createState() =>
-      _GeminiChatSheetState();
+  State<_GeminiChatSheet> createState() => _GeminiChatSheetState();
 }
-class _GeminiChatSheetState
-    extends State<_GeminiChatSheet> {
-  final TextEditingController _controller =
-      TextEditingController();
-      
-  final List<Map<String, String>> _chat =
-      [];
+
+class _GeminiChatSheetState extends State<_GeminiChatSheet> {
+  final TextEditingController _controller = TextEditingController();
+  final List<Map<String, String>> _chat = [];
+  final ScrollController _scrollController = ScrollController();
   bool _isLoading = false;
-  final ScrollController _scrollController =
-      ScrollController();
-  // Keys used to save the AI conversation.
-  static const String _chatStorageKey =
-      'exam_hook_ai_chat';
-  static const String _chatTimeKey =
-      'exam_hook_ai_chat_time';
-  // Conversation lifetime.
-  static const Duration _chatLifetime =
-      Duration(hours: 24);
-     
-  Widget _renderGeminiText(String text, BuildContext context, String originalText) {
-    // 1. Strip markdown that causes sticking
-    String cleaned = text
-        .replaceAll('*', '')
-        .replaceAll('_', '')
-        .replaceAll('`', '')
-        .trim();
 
-    // 2. Fix common collapsed words from Gemini
-    cleaned = cleaned
-        .replaceAll('numberof', 'number of')
-        .replaceAll('massof', 'mass of')
-        .replaceAll('totalmass', 'total mass')
-        .replaceAll('BindingEnergy', 'Binding Energy')
-        .replaceAll('speedoflight', 'speed of light')
-        .replaceAll('massdefect', 'mass defect')
-        .replaceAll('pernucleon', 'per nucleon');
+  static const String _chatStorageKey = 'exam_hook_ai_chat';
+  static const String _chatTimeKey = 'exam_hook_ai_chat_time';
+  static const Duration _chatLifetime = Duration(hours: 24);
 
-    return GestureDetector(
-      onLongPress: () {
-        _showMessageOptions(context, originalText, false); // false = AI message
-      },
-      child: SingleChildScrollView( // <-- HORIZONTAL SCROLL
-        scrollDirection: Axis.horizontal,
-        child: SelectableText( // <-- COPYABLE
-          cleaned,
-          style: GoogleFonts.poppins(
-            color: Colors.black,
-            fontSize: 15,
-            height: 1.6,
-          ),
-          textAlign: TextAlign.left,
-        ),
-      ),
-    );
+  @override
+  void initState() {
+    super.initState();
+    _loadChat();
   }
-    
 
-  void _showMessageOptions(BuildContext context, String message, bool isUser) {
+  @override
+  void dispose() {
+    _controller.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  String _spaceCollapsedWords(String input) {
+    var cleaned = input
+        .replaceAll(RegExp(r'\*\*|\*|`|_'), '')
+        .replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (m) => '${m[1]} ${m[2]}')
+        .replaceAllMapped(RegExp(r'([A-Za-z])(\d)'), (m) => '${m[1]} ${m[2]}')
+        .replaceAllMapped(RegExp(r'(\d)([A-Za-z])'), (m) => '${m[1]} ${m[2]}');
+
+    const replacements = {
+      'numberof': 'number of',
+      'massof': 'mass of',
+      'totalmass': 'total mass',
+      'BindingEnergy': 'Binding Energy',
+      'bindingenergy': 'binding energy',
+      'speedoflight': 'speed of light',
+      'massdefect': 'mass defect',
+      'pernucleon': 'per nucleon',
+      'gravitationalforce': 'gravitational force',
+      'kineticenergy': 'kinetic energy',
+      'potentialenergy': 'potential energy',
+      'workdone': 'work done',
+      'electriccurrent': 'electric current',
+      'electricfield': 'electric field',
+      'centripetalforce': 'centripetal force',
+      'accelerationduetogravity': 'acceleration due to gravity',
+    };
+
+    replacements.forEach((from, to) {
+      cleaned = cleaned.replaceAll(from, to);
+    });
+
+    return cleaned.replaceAll(RegExp(r'[ \t]+'), ' ').trim();
+  }
+
+  Future<void> _loadChat() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedTime = prefs.getInt(_chatTimeKey);
+      final savedMessages = prefs.getStringList(_chatStorageKey);
+
+      if (savedTime == null || savedMessages == null) return;
+
+      final savedAt = DateTime.fromMillisecondsSinceEpoch(savedTime);
+      if (DateTime.now().difference(savedAt) >= _chatLifetime) {
+        await prefs.remove(_chatStorageKey);
+        await prefs.remove(_chatTimeKey);
+        return;
+      }
+
+      final restored = <Map<String, String>>[];
+      for (final encoded in savedMessages) {
+        try {
+          final decoded = jsonDecode(encoded);
+          if (decoded is Map) {
+            final role = decoded['role']?.toString() ?? '';
+            final text = decoded['text']?.toString() ?? '';
+            if (role.isNotEmpty && text.isNotEmpty) {
+              restored.add({'role': role, 'text': text});
+            }
+          }
+        } catch (e) {
+          debugPrint('Could not restore AI message: $e');
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _chat
+          ..clear()
+          ..addAll(restored);
+      });
+      _scrollToBottom();
+    } catch (e) {
+      debugPrint('AI chat load error: $e');
+    }
+  }
+
+  Future<void> _saveChat() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final encoded = _chat.map((message) {
+        return jsonEncode({
+          'role': message['role'] ?? '',
+          'text': message['text'] ?? '',
+        });
+      }).toList();
+
+      await prefs.setStringList(_chatStorageKey, encoded);
+      if (!prefs.containsKey(_chatTimeKey)) {
+        await prefs.setInt(
+          _chatTimeKey,
+          DateTime.now().millisecondsSinceEpoch,
+        );
+      }
+    } catch (e) {
+      debugPrint('AI chat save error: $e');
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  Future<void> _copyMessage(String text) async {
+    try {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (!mounted) return;
+      _showSimpleToast(context, success: true);
+    } catch (e) {
+      if (!mounted) return;
+      _showSimpleToast(context, success: false);
+    }
+  }
+
+  void _showMessageOptions(String text, bool isUser) {
     showModalBottomSheet(
       context: context,
-      builder: (_) {
+      showDragHandle: true,
+      builder: (sheetContext) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          child: Wrap(
             children: [
               ListTile(
-                leading: const Icon(Icons.copy),
+                leading: const Icon(Icons.copy_rounded),
                 title: const Text('Copy'),
-                onTap: () {
-                  Clipboard.setData(ClipboardData(text: message));
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Copied to clipboard')),
-                  );
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  await _copyMessage(text);
                 },
               ),
-              if (!isUser) // Only allow reply to AI
+              if (!isUser)
                 ListTile(
-                  leading: const Icon(Icons.reply),
+                  leading: const Icon(Icons.reply_rounded),
                   title: const Text('Reply to this'),
                   onTap: () {
-                    Navigator.pop(context);
-                    _controller.text = "@AI $message\n"; // prefill with quote
+                    Navigator.pop(sheetContext);
+                    _controller.text = '@AI $text\n';
                     _controller.selection = TextSelection.fromPosition(
                       TextPosition(offset: _controller.text.length),
                     );
@@ -2999,423 +3404,294 @@ class _GeminiChatSheetState
       },
     );
   }
-   
-  @override
-  void initState() {
-    super.initState();
-    _loadChat();
-  }
-  @override
-  void dispose() {
-    _controller.dispose();
-    _scrollController.dispose();
-    super.dispose();
-  }
-  // ---------------------------------------------------------------------------
-  // LOAD AI CHAT
-  // ---------------------------------------------------------------------------
-  Future<void> _loadChat() async {
+
+  Future<void> _clearChat() async {
     try {
-      final SharedPreferences prefs =
-          await SharedPreferences.getInstance();
-      final int? savedTime =
-          prefs.getInt(_chatTimeKey);
-      final List<String>? savedMessages =
-          prefs.getStringList(
-        _chatStorageKey,
-      );
-      if (savedTime == null ||
-          savedMessages == null ||
-          savedMessages.isEmpty) {
-        return;
-      }
-      final DateTime savedAt =
-          DateTime.fromMillisecondsSinceEpoch(
-        savedTime,
-      );
-      final Duration age =
-          DateTime.now().difference(savedAt);
-      // Automatically remove conversation after 24 hours.
-      if (age >= _chatLifetime) {
-        await prefs.remove(_chatStorageKey);
-        await prefs.remove(_chatTimeKey);
-        return;
-      }
-      final List<Map<String, String>>
-          restoredChat = [];
-      for (final String encoded
-          in savedMessages) {
-        try {
-          final dynamic decoded =
-              jsonDecode(encoded);
-          if (decoded is Map) {
-            final String role =
-                decoded['role']?.toString() ?? '';
-            final String text =
-                decoded['text']?.toString() ?? '';
-            if (role.isNotEmpty &&
-                text.isNotEmpty) {
-              restoredChat.add({
-                'role': role,
-                'text': text,
-              });
-            }
-          }
-        } catch (e) {
-          debugPrint(
-            'Could not restore AI message: $e',
+      final shouldClear = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Clear AI Chat'),
+            content: const Text('Are you sure you want to clear this chat?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Clear'),
+              ),
+            ],
           );
-        }
-      }
+        },
+      );
+
+      if (shouldClear != true) return;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_chatStorageKey);
+      await prefs.remove(_chatTimeKey);
+
       if (!mounted) return;
-      setState(() {
-        _chat.clear();
-        _chat.addAll(restoredChat);
-      });
-      _scrollToBottom();
+      setState(() => _chat.clear());
+      _showSimpleToast(context, success: true);
     } catch (e) {
-      debugPrint(
-        'AI chat load error: $e',
-      );
+      if (!mounted) return;
+      _showSimpleToast(context, success: false);
     }
   }
 
-  void _scrollToBottom() {
-    Future.delayed(const Duration(milliseconds: 150), () {
-      if (!_scrollController.hasClients) {
-        return;
-      }
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
-    });
-  }
-
-  Future<void> _sendMessage() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
-    setState(() {
-      _chat.add({'role': 'user', 'text': text});
-      _isLoading = true;
-    });
-    _controller.clear();
-    _scrollToBottom();
-    try {
-      final response = await widget.model.generateContent([Content.text(text)]); // <-- FIXED: widget.model
-      setState(() {
-        _chat.add({'role': 'model', 'text': response.text ?? ''});
-        _isLoading = false;
-      });
-      _saveChat();
-    } catch (e) {
-      setState(() => _isLoading = false);
-    }
-    _scrollToBottom();
-  }
-
-  // SAVE AI CHAT
-  // ---------------------------------------------------------------------------
-  Future<void> _saveChat() async {
-    try {
-      final SharedPreferences prefs =
-          await SharedPreferences.getInstance();
-      final List<String> encodedMessages =
-          _chat.map((message) {
-        return jsonEncode({
-          'role': message['role'] ?? '',
-          'text': message['text'] ?? '',
-        });
-      }).toList();
-      await prefs.setStringList(
-        _chatStorageKey,
-        encodedMessages,
-      );
-      // Only set the timestamp if this conversation
-      // does not already have one.
-      if (!prefs.containsKey(_chatTimeKey)) {
-        await prefs.setInt(
-          _chatTimeKey,
-          DateTime.now()
-              .millisecondsSinceEpoch,
-        );
-      }
-    } catch (e) {
-      debugPrint(
-        'AI chat save error: $e',
-      );
-    }
-  }
-  // ---------------------------------------------------------------------------
-  // CLEAR EXPIRED CHAT
-  // ---------------------------------------------------------------------------
-  Future<void> _clearExpiredChatIfNeeded() async {
-    try {
-      final SharedPreferences prefs =
-          await SharedPreferences.getInstance();
-      final int? savedTime =
-          prefs.getInt(_chatTimeKey);
-      if (savedTime == null) {
-        return;
-      }
-      final DateTime savedAt =
-          DateTime.fromMillisecondsSinceEpoch(
-        savedTime,
-      );
-      if (DateTime.now().difference(savedAt) >=
-          _chatLifetime) {
-        await prefs.remove(_chatStorageKey);
-        await prefs.remove(_chatTimeKey);
-        if (!mounted) return;
-        setState(() {
-          _chat.clear();
-        });
-      }
-    } catch (e) {
-      debugPrint(
-        'AI chat expiry error: $e',
-      );
-    }
-  }
-  // ---------------------------------------------------------------------------
-  // ASK AI
-  // ---------------------------------------------------------------------------
   Future<void> _ask() async {
-    await _clearExpiredChatIfNeeded();
-    final String question =
-        _controller.text.trim();
-    if (question.isEmpty ||
-        _isLoading) {
-      return;
-    }
-    if (!mounted) return;
+    final question = _controller.text.trim();
+    if (question.isEmpty || _isLoading) return;
+
     setState(() {
-      _chat.add({
-        'role': 'user',
-        'text': question,
-      });
+      _chat.add({'role': 'user', 'text': question});
       _isLoading = true;
     });
     _controller.clear();
-    // Save immediately so the user message survives
-    // closing/reopening the AI sheet.
     await _saveChat();
+    _scrollToBottom();
+
     try {
-      final String prompt =
-          '''
+      final prompt = '''
 You are ExamHook AI tutor for high school students in Zimbabwe.
+
 Rules:
 1. Do NOT use asterisks for bold or italic.
-2. Use plain text with headings like "Definition:"
-3. For formulas write them in plain LaTeX without \$ signs. Example: F = ma, E = mc^2, \\\\frac{a}{b}, x^2, \\\\sqrt{b^2 - 4ac}
-4. Keep answers clear, short, with examples.
-Question: $question
+2. Use plain text with clear headings such as Definition:, Explanation:, Example:.
+3. For formulas, write them in plain LaTeX without dollar signs.
+4. Keep answers clear, well-spaced and easy to read.
+5. Never join words together.
+6. Use examples where useful.
+7. Show calculation steps when solving mathematics or science questions.
+
+Question:
+$question
 ''';
-      final GenerateContentResponse response =
-          await widget.model.generateContent([ // <-- FIXED: widget.model
+
+      final response = await widget.model.generateContent([
         Content.text(prompt),
       ]);
+
+      final answer = response.text?.trim();
+      if (answer == null || answer.isEmpty) {
+        throw Exception('Empty AI response');
+      }
+
       if (!mounted) return;
       setState(() {
-        final String aiResponse = response.text?.trim() ?? '';
         _chat.add({
-          'role': 'ai',
-          'text': aiResponse.isNotEmpty
-              ? aiResponse
-              : 'Currently Chat with @SciWrapper at 0718502707',
+          'role': 'model',
+          'text': _spaceCollapsedWords(answer),
         });
         _isLoading = false;
       });
       await _saveChat();
       _scrollToBottom();
+      if (mounted) _showSimpleToast(context, success: true);
     } catch (e) {
+      debugPrint('AI chat error: $e');
       if (!mounted) return;
       setState(() {
         _chat.add({
-          'role': 'ai',
+          'role': 'model',
           'text': 'Currently Chat with @SciWrapper at 0718502707',
         });
         _isLoading = false;
       });
       await _saveChat();
       _scrollToBottom();
+      if (mounted) _showSimpleToast(context, success: false);
     }
   }
-  // ---------------------------------------------------------------------------
-  // BUILD AI CHAT
-  // ---------------------------------------------------------------------------
-@override
-Widget build(BuildContext context) {
-  return SafeArea(
-    bottom: false, // let us handle bottom padding manually
-    child: Container(
-      height: MediaQuery.of(context).size.height * 0.85,
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom, // pushes up with keyboard
+
+  Widget _messageBubble(Map<String, String> message, bool isDark) {
+    final role = message['role'] ?? '';
+    final text = message['text'] ?? '';
+    final isUser = role == 'user';
+
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: GestureDetector(
+        onLongPress: () => _showMessageOptions(text, isUser),
+        child: Container(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.88,
+          ),
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+          decoration: BoxDecoration(
+            color: isUser
+                ? const Color(0xFF00C896)
+                : (isDark ? const Color(0xFF202020) : Colors.grey.shade100),
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(18),
+              topRight: const Radius.circular(18),
+              bottomLeft: Radius.circular(isUser ? 18 : 4),
+              bottomRight: Radius.circular(isUser ? 4 : 18),
+            ),
+          ),
+          child: isUser
+              ? SelectableText(
+                  _spaceCollapsedWords(text),
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontSize: 15.5,
+                    height: 1.6,
+                    letterSpacing: 0.15,
+                  ),
+                )
+              : _buildMathText(
+                  _spaceCollapsedWords(text),
+                  style: GoogleFonts.poppins(
+                    color: isDark ? Colors.white : Colors.black87,
+                    fontSize: 15.5,
+                    height: 1.65,
+                    letterSpacing: 0.15,
+                  ),
+                  align: TextAlign.left,
+                ),
+        ),
       ),
-      child: Column(
-        children: [
-          AppBar(
-            title: Text(
-              'Ask ExamHook AI',
-              style: GoogleFonts.poppins(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Scaffold(
+      resizeToAvoidBottomInset: true,
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const Icon(Icons.auto_awesome_rounded),
+            const SizedBox(width: 8),
+            Text(
+              'ExamHook AI',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
             ),
-            automaticallyImplyLeading: false,
-            backgroundColor: const Color(0xFF00C896),
-            actions: [
-              IconButton(
-                tooltip: 'Clear AI conversation',
-                icon: const Icon(Icons.delete_outline),
-                onPressed: _chat.isEmpty
-                    ? null
-                    : () async {
-                        final bool? confirmed = await showDialog<bool>(
-                          context: context,
-                          builder: (dialogContext) {
-                            return AlertDialog(
-                              title: const Text('Clear conversation?'),
-                              content: const Text(
-                                'This will remove the saved AI conversation.',
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () =>
-                                      Navigator.pop(dialogContext, false),
-                                  child: const Text('Cancel'),
-                                ),
-                                ElevatedButton(
-                                  onPressed: () =>
-                                      Navigator.pop(dialogContext, true),
-                                  child: const Text('Clear'),
-                                ),
-                              ],
-                            );
-                          },
-                        );
-                        if (confirmed != true) return;
-                        try {
-                          final SharedPreferences prefs =
-                              await SharedPreferences.getInstance();
-                          await prefs.remove(_chatStorageKey);
-                          await prefs.remove(_chatTimeKey);
-                          if (!mounted) return;
-                          setState(() {
-                            _chat.clear();
-                          });
-                        } catch (e) {
-                          debugPrint('Clear AI chat error: $e');
-                        }
-                      },
-              ),
-            ],
+          ],
+        ),
+        backgroundColor: const Color(0xFF00C896),
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            tooltip: 'Clear chat',
+            onPressed: _chat.isEmpty ? null : _clearChat,
+            icon: const Icon(Icons.delete_outline_rounded),
           ),
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              reverse: true,
-              // FIX 1: HUGE bottom padding. Accounts for input row + keyboard
-              padding: EdgeInsets.only(
-                top: 12,
-                left: 12,
-                right: 12,
-                bottom: 160 + MediaQuery.of(context).viewInsets.bottom,
-              ),
-              physics: const AlwaysScrollableScrollPhysics(),
-              keyboardDismissBehavior:
-                  ScrollViewKeyboardDismissBehavior.onDrag,
-              itemCount: _chat.length,
-              itemBuilder: (context, i) {
-                final Map<String, String> msg = _chat[_chat.length - 1 - i];
-                final bool isUser = msg['role'] == 'user';
-                return Align(
-                  alignment:
-                      isUser ? Alignment.centerRight : Alignment.centerLeft,
-                  child: GestureDetector( // Wrap container for long press on both
-                    onLongPress: () {
-                      _showMessageOptions(context, msg['text'] ?? '', isUser);
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      padding: const EdgeInsets.all(12),
-                      constraints: BoxConstraints(
-                        maxWidth: MediaQuery.of(context).size.width * 0.8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isUser
-                            ? const Color(0xFF00C896)
-                            : Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: SingleChildScrollView( // <-- FIX: horizontal scroll
-                        scrollDirection: Axis.horizontal,
-                        child: isUser
-                            ? SelectableText( // COPYABLE user text
-                                msg['text'] ?? '',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.white,
-                                  fontSize: 15,
-                                  height: 1.5,
-                                ),
-                              )
-                            : _buildMathText( // AI: render LaTeX + horizontal scroll
-                                msg['text'] ?? '',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.black,
-                                  fontSize: 15,
-                                  height: 1.6,
-                                ),
-                                align: TextAlign.left,
-                              ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          if (_isLoading) const LinearProgressIndicator(minHeight: 2),
-          // FIX 2: Wrap input in Padding so it sits above keyboard
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    onSubmitted: (_) => _ask(),
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: InputDecoration(
-                      hintText: 'Ask about Maths, Physics...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                CircleAvatar(
-                  backgroundColor: const Color(0xFF00C896),
-                  child: IconButton(
-                    icon: const Icon(
-                      Icons.send,
-                      color: Colors.white,
-                      size: 20,
-                    ),
-                    onPressed: _ask,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(height: MediaQuery.of(context).padding.bottom), // for iPhone home bar
         ],
       ),
-    ),
-  );
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: _chat.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(28),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.auto_awesome_rounded,
+                              size: 58,
+                              color: Color(0xFF00C896),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Ask ExamHook AI',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.poppins(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Ask questions about your subjects, calculations, definitions and exam preparation.',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                height: 1.5,
+                                color: isDark ? Colors.white70 : Colors.black54,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.fromLTRB(8, 12, 8, 16),
+                      itemCount: _chat.length,
+                      itemBuilder: (context, index) {
+                        return _messageBubble(_chat[index], isDark);
+                      },
+                    ),
+            ),
+            if (_isLoading)
+              const LinearProgressIndicator(minHeight: 2),
+            Container(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF151515) : Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    blurRadius: 8,
+                    offset: const Offset(0, -2),
+                    color: Colors.black.withOpacity(0.08),
+                  ),
+                ],
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      minLines: 1,
+                      maxLines: 5,
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: InputDecoration(
+                        hintText: 'Ask ExamHook AI...',
+                        filled: true,
+                        fillColor: isDark
+                            ? const Color(0xFF242424)
+                            : Colors.grey.shade100,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 12,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Material(
+                    color: const Color(0xFF00C896),
+                    shape: const CircleBorder(),
+                    child: IconButton(
+                      tooltip: 'Send',
+                      onPressed: _isLoading ? null : _ask,
+                      color: Colors.white,
+                      icon: const Icon(Icons.send_rounded),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
-} 
