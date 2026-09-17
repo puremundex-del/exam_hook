@@ -11,7 +11,7 @@
     <application
         android:label="ExamHook"
         android:name="${applicationName}"
-        android:icon="@mipmap/round">
+        android:icon="@mipmap/league_logo">
         <activity
             android:name=".MainActivity"
             android:exported="true"
