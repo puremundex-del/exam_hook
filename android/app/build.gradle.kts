@@ -18,7 +18,7 @@ android {
     defaultConfig {
         applicationId = "com.example.exam_hook"
         minSdk = flutter.minSdkVersion
-        targetSdk p= flutter.targetSdkVersion
+        targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
