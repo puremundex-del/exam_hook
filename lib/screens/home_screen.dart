@@ -722,7 +722,9 @@ Rules:
     String title, {
     bool countDownload = true,
   }) async {
-    if (url.trim().isEmpty) {
+    final String trimmedUrl = url.trim();
+
+    if (trimmedUrl.isEmpty) {
       if (mounted) _showToast(success: false);
       return;
     }
@@ -733,56 +735,91 @@ Rules:
     try {
       await _saveRecent(docId);
 
-      final Uri uri = Uri.tryParse(url.trim()) ?? Uri();
-      if (uri.toString().isEmpty) {
+      final Uri? parsedUri = Uri.tryParse(trimmedUrl);
+      if (parsedUri == null ||
+          parsedUri.scheme.isEmpty ||
+          (parsedUri.scheme != 'http' &&
+              parsedUri.scheme != 'https' &&
+              parsedUri.scheme != 'blob' &&
+              parsedUri.scheme != 'data')) {
         throw Exception('Invalid resource URL');
       }
 
       bool opened = false;
 
       if (kIsWeb) {
-        opened = await canLaunchUrl(uri);
-        if (opened) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        }
+        // On web, let the browser handle the resource. This works for PDFs,
+        // images, videos, Office files, text files and URLs whose extension is
+        // hidden behind a storage/query URL.
+        opened = await launchUrl(
+          parsedUri,
+          webOnlyWindowName: '_blank',
+        );
       } else {
-        final String path = uri.path.toLowerCase();
-        final bool isPdf = path.endsWith('.pdf') || path.contains('.pdf/');
+        final String path = parsedUri.path.toLowerCase();
+        final bool isPdf =
+            path.endsWith('.pdf') || path.contains('.pdf/');
 
         if (isPdf) {
+          // Keep the existing in-app PDF viewer for PDFs.
           await Navigator.push(
             context,
             MaterialPageRoute(
               builder: (_) => PdfViewerScreen(
-                url: url.trim(),
+                url: trimmedUrl,
                 title: title,
               ),
             ),
           );
           opened = true;
-        } else if (await canLaunchUrl(uri)) {
-          await launchUrl(
-            uri,
+        } else {
+          // Do not restrict viewing by file extension. A resource URL may be
+          // extensionless, contain query parameters, or point to a file type
+          // that is not known by this screen. Android/iOS/browser handlers are
+          // allowed to choose the appropriate viewer for the resource.
+          opened = await launchUrl(
+            parsedUri,
             mode: LaunchMode.externalApplication,
           );
-          opened = true;
+
+          // Some platforms do not report a handler through
+          // externalApplication even though the URL can be opened in a
+          // browser. Try the platform's normal URL handler as a fallback.
+          if (!opened) {
+            opened = await launchUrl(parsedUri);
+          }
         }
       }
 
-      // Count the download only after the resource has actually been opened.
-      // SharedPreferences stores the lock so reopening/restarting the app
-      // cannot increment the same resource again on this installation.
+      // Count a successful first view only once per resource installation.
+      //
+      // The preference is written BEFORE the Firestore increment. This ordering
+      // prevents a crash/restart between the Firestore write and preference
+      // write from incrementing the same resource again on the next launch.
+      //
+      // The existing countDownload flag is intentionally preserved so callers
+      // that explicitly opt out (for example, My Uploads history) remain
+      // unchanged.
       if (opened && countDownload) {
         final SharedPreferences prefs =
             await SharedPreferences.getInstance();
         final String key = 'resource_download_counted_$docId';
-        final bool alreadyCounted = prefs.getBool(key) ?? false;
 
-        if (!alreadyCounted) {
-          await _firestore.collection('resources').doc(docId).update({
-            'downloads': FieldValue.increment(1),
-          });
+        if (!(prefs.getBool(key) ?? false)) {
+          // Claim the first-view count locally before touching Firestore.
           await prefs.setBool(key, true);
+
+          try {
+            await _firestore.collection('resources').doc(docId).update({
+              'downloads': FieldValue.increment(1),
+            });
+          } catch (e) {
+            // If Firestore could not record the count, release the local claim
+            // so a later successful view can retry instead of permanently
+            // losing the count.
+            await prefs.remove(key);
+            rethrow;
+          }
         }
       }
 
