@@ -153,7 +153,8 @@ class _MarqueeText extends StatefulWidget {
   State<_MarqueeText> createState() => _MarqueeTextState();
 }
 
-class _MarqueeTextState extends State<_MarqueeText> with SingleTickerProviderStateMixin {
+class _MarqueeTextState extends State<_MarqueeText>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
   @override
@@ -161,7 +162,7 @@ class _MarqueeTextState extends State<_MarqueeText> with SingleTickerProviderSta
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 22),
+      duration: const Duration(seconds: 18),
     )..repeat();
   }
 
@@ -175,25 +176,24 @@ class _MarqueeTextState extends State<_MarqueeText> with SingleTickerProviderSta
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (_, constraints) {
+        final double availableWidth = constraints.maxWidth;
         return ClipRect(
           child: AnimatedBuilder(
             animation: _controller,
             builder: (_, __) {
-              final width = constraints.maxWidth;
-              final dx = -(width * _controller.value);
-              return Transform.translate(
-                offset: Offset(dx, 0),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: SizedBox(
-                    width: width * 2,
-                    child: Center(
-                      child: Text(
-                        '${widget.text}     ✦     ${widget.text}',
-                        maxLines: 1,
-                        overflow: TextOverflow.clip,
-                        style: widget.style,
-                      ),
+              return Align(
+                alignment: Alignment.centerLeft,
+                child: FractionallySizedBox(
+                  widthFactor: 1,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      widget.text,
+                      maxLines: 3,
+                      softWrap: true,
+                      overflow: TextOverflow.visible,
+                      textAlign: TextAlign.center,
+                      style: widget.style,
                     ),
                   ),
                 ),
@@ -351,21 +351,21 @@ class _HomeScreenState extends State<HomeScreen> {
         try {
           final response = await aiModel.generateContent([
             Content.text(
-              '''Create one original motivational statement for a high-school student studying today.
+              '''Create one complete original motivational statement for a high-school student studying today.
 Date: $dateKey
 Rules:
-- Return only the motivational statement.
-- Maximum 22 words.
+- Return only the complete motivational statement.
+- Maximum 35 words.
+- Do not shorten, truncate, or cut off the statement.
 - No quotation marks, hashtags, emojis, politics, or famous quotes.
-- Make it encouraging and focused on learning, consistency, understanding, and progress.''',
+- Make it encouraging and focused on learning, consistency, understanding, effort, and progress.
+- Write a natural, complete sentence that can be displayed in full.''',
             ),
           ]);
           quote = (response.text ?? '')
               .replaceAll(RegExp(r'^["“]|["”]$'), '')
+              .replaceAll(RegExp(r'\s+'), ' ')
               .trim();
-          if (quote.length > 180) {
-            quote = quote.substring(0, 180).trim();
-          }
         } catch (e) {
           debugPrint('AI daily motivation error: $e');
         }
@@ -430,7 +430,7 @@ Rules:
         .map((q) => '“${q['quote']}” — ${q['author']}')
         .join('     ✦     ');
     return Container(
-      height: 64,
+      constraints: const BoxConstraints(minHeight: 92),
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
