@@ -190,7 +190,7 @@ class _MarqueeTextState extends State<_MarqueeText> with SingleTickerProviderSta
                     child: Center(
                       child: Text(
                         '${widget.text}     ✦     ${widget.text}',
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.clip,
                         style: widget.style,
                       ),
@@ -222,6 +222,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String searchQuery = '';
   final Set<String> likedDocs = {};
   final Set<String> ratedDocs = {};
+  final Set<String> _likeInProgress = {};
+  final Set<String> _rateInProgress = {};
+  final Set<String> _viewInProgress = {};
   Set<String> favoriteDocs = {};
   Set<String> recentlyViewed = {};
   List<String> myUploads = [];
@@ -311,42 +314,123 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadDailyQuotes() async {
+    // Always keep a message available so the marquee never disappears.
+    // The message changes automatically each calendar day.
     try {
-      final snapshot = await _firestore.collection('motivation_quotes').get();
-      final List<Map<String, String>> quotes = snapshot.docs.map((doc) {
-        final data = doc.data();
-        return {
-          'quote': data['quote']?.toString() ?? data['text']?.toString() ?? '',
-          'author': data['author']?.toString() ?? data['writer']?.toString() ?? 'Unknown',
-        };
-      }).where((q) => q['quote']!.trim().isNotEmpty).toList();
+      final SharedPreferences prefs =
+          await SharedPreferences.getInstance();
+      final DateTime now = DateTime.now();
+      final String dateKey =
+          '${now.year.toString().padLeft(4, '0')}-'
+          '${now.month.toString().padLeft(2, '0')}-'
+          '${now.day.toString().padLeft(2, '0')}';
 
-      if (quotes.isEmpty) throw Exception('No motivation quotes found');
+      final String? savedDate = prefs.getString('daily_motivation_date');
+      final String? savedQuote = prefs.getString('daily_motivation_quote');
+      final String? savedAuthor = prefs.getString('daily_motivation_author');
 
-      // Deterministic daily shuffle: all users see the same two shuffled quotes
-      // for a given date, while the selection changes automatically each day.
-      final now = DateTime.now();
-      final seed = now.year * 10000 + now.month * 100 + now.day;
-      quotes.shuffle(math.Random(seed));
+      if (savedDate == dateKey && savedQuote != null && savedQuote.trim().isNotEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _dailyQuotes = [
+            {
+              'quote': savedQuote.trim(),
+              'author': (savedAuthor ?? 'ExamHook AI').trim(),
+            },
+          ];
+          _quotesLoading = false;
+        });
+        return;
+      }
+
+      String quote = '';
+      String author = 'ExamHook AI';
+
+      final GenerativeModel? aiModel = model;
+      if (aiModel != null) {
+        try {
+          final response = await aiModel.generateContent([
+            Content.text(
+              '''Create one original motivational statement for a high-school student studying today.
+Date: $dateKey
+Rules:
+- Return only the motivational statement.
+- Maximum 22 words.
+- No quotation marks, hashtags, emojis, politics, or famous quotes.
+- Make it encouraging and focused on learning, consistency, understanding, and progress.''',
+            ),
+          ]);
+          quote = (response.text ?? '')
+              .replaceAll(RegExp(r'^["“]|["”]$'), '')
+              .trim();
+          if (quote.length > 180) {
+            quote = quote.substring(0, 180).trim();
+          }
+        } catch (e) {
+          debugPrint('AI daily motivation error: $e');
+        }
+      }
+
+      // Offline/no-key fallback. The date seed makes the message change daily
+      // without changing the rest of the HomeScreen scope.
+      if (quote.isEmpty) {
+        const fallback = <String>[
+          'Small progress each day builds the knowledge you need for success.',
+          'Study with purpose today, and let your future self thank you tomorrow.',
+          'Every question you solve is another step toward mastering your goals.',
+          'Consistency turns difficult topics into familiar ones.',
+          'Keep learning, keep practising, and keep moving forward.',
+          'Your effort today is building the skills you will use tomorrow.',
+          'Focus on understanding, not just memorising, and progress will follow.',
+          'A little revision every day can make a big difference over time.',
+          'Mistakes are part of learning; use them to discover what to improve.',
+          'Believe in your ability to learn, then prove it through steady practice.',
+        ];
+        final int seed = now.year * 10000 + now.month * 100 + now.day;
+        quote = fallback[math.Random(seed).nextInt(fallback.length)];
+        author = 'ExamHook';
+      }
+
+      await prefs.setString('daily_motivation_date', dateKey);
+      await prefs.setString('daily_motivation_quote', quote);
+      await prefs.setString('daily_motivation_author', author);
+
       if (!mounted) return;
       setState(() {
-        _dailyQuotes = quotes.take(math.min(2, quotes.length)).toList();
+        _dailyQuotes = [
+          {'quote': quote, 'author': author},
+        ];
         _quotesLoading = false;
       });
     } catch (e) {
-      debugPrint('Daily quotes error: $e');
+      debugPrint('Daily motivation error: $e');
       if (!mounted) return;
-      setState(() => _quotesLoading = false);
+      setState(() {
+        _dailyQuotes = [
+          {
+            'quote': 'Keep learning, keep practising, and keep moving forward.',
+            'author': 'ExamHook',
+          },
+        ];
+        _quotesLoading = false;
+      });
     }
   }
 
   Widget _buildDailyQuotesMarquee(bool isDark) {
-    if (_quotesLoading || _dailyQuotes.isEmpty) return const SizedBox.shrink();
-    final text = _dailyQuotes
+    final List<Map<String, String>> messages = _dailyQuotes.isEmpty
+        ? const [
+            {
+              'quote': 'Keep learning, keep practising, and keep moving forward.',
+              'author': 'ExamHook',
+            },
+          ]
+        : _dailyQuotes;
+    final text = messages
         .map((q) => '“${q['quote']}” — ${q['author']}')
         .join('     ✦     ');
     return Container(
-      height: 58,
+      height: 64,
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
@@ -373,6 +457,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       setState(() {
         _themeMode = prefs.getString('theme_mode') ?? 'light';
+        likedDocs.addAll(prefs.getStringList('liked_resources') ?? []);
+        ratedDocs.addAll(prefs.getStringList('rated_resources') ?? []);
         favoriteDocs = Set<String>.from(prefs.getStringList('favorites') ?? []);
         recentlyViewed = Set<String>.from(prefs.getStringList('recent') ?? []);
         myUploads = prefs.getStringList('my_uploads') ?? [];
@@ -636,62 +722,81 @@ class _HomeScreenState extends State<HomeScreen> {
     String title, {
     bool countDownload = true,
   }) async {
-    await _saveRecent(docId);
-    if (countDownload) {
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        final key = 'resource_download_counted_$docId';
-        final alreadyCounted = prefs.getBool(key) ?? false;
+    if (url.trim().isEmpty) {
+      if (mounted) _showToast(success: false);
+      return;
+    }
+
+    if (_viewInProgress.contains(docId)) return;
+    _viewInProgress.add(docId);
+
+    try {
+      await _saveRecent(docId);
+
+      final Uri uri = Uri.tryParse(url.trim()) ?? Uri();
+      if (uri.toString().isEmpty) {
+        throw Exception('Invalid resource URL');
+      }
+
+      bool opened = false;
+
+      if (kIsWeb) {
+        opened = await canLaunchUrl(uri);
+        if (opened) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      } else {
+        final String path = uri.path.toLowerCase();
+        final bool isPdf = path.endsWith('.pdf') || path.contains('.pdf/');
+
+        if (isPdf) {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PdfViewerScreen(
+                url: url.trim(),
+                title: title,
+              ),
+            ),
+          );
+          opened = true;
+        } else if (await canLaunchUrl(uri)) {
+          await launchUrl(
+            uri,
+            mode: LaunchMode.externalApplication,
+          );
+          opened = true;
+        }
+      }
+
+      // Count the download only after the resource has actually been opened.
+      // SharedPreferences stores the lock so reopening/restarting the app
+      // cannot increment the same resource again on this installation.
+      if (opened && countDownload) {
+        final SharedPreferences prefs =
+            await SharedPreferences.getInstance();
+        final String key = 'resource_download_counted_$docId';
+        final bool alreadyCounted = prefs.getBool(key) ?? false;
+
         if (!alreadyCounted) {
           await _firestore.collection('resources').doc(docId).update({
             'downloads': FieldValue.increment(1),
           });
           await prefs.setBool(key, true);
         }
-      } catch (e) {
-        debugPrint('Download counter error: $e');
       }
-    }
-    if (!mounted) return;
-    try {
-      final Uri uri = Uri.parse(url);
-      if (kIsWeb) {
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(
-            uri,
-            mode: LaunchMode.externalApplication,
-          );
-          _showToast(success: true);
-        } else {
-          _showToast(success: false);
-        }
-        return;
-      }
-      if (url.toLowerCase().contains('.pdf')) {
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => PdfViewerScreen(
-              url: url,
-              title: title,
-            ),
-          ),
-        );
-        _showToast(success: true);
-      } else {
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(
-            uri,
-            mode: LaunchMode.externalApplication,
-          );
-          _showToast(success: true);
-        }
+
+      if (mounted) {
+        _showToast(success: opened);
       }
     } catch (e) {
-      if (!mounted) return;
-      _showToast(success: false);
+      debugPrint('Open resource error: $e');
+      if (mounted) _showToast(success: false);
+    } finally {
+      _viewInProgress.remove(docId);
     }
   }
+
   // ---------------------------------------------------------------------------
   // AI FLASHCARDS FROM PDF
   // ---------------------------------------------------------------------------
@@ -823,77 +928,104 @@ Rules:
     );
   }
   Future<void> _likeResource(String docId) async {
-    if (likedDocs.contains(docId)) {
+    if (likedDocs.contains(docId) || _likeInProgress.contains(docId)) {
       return;
     }
+
+    _likeInProgress.add(docId);
     try {
-      await _firestore
-          .collection('resources')
-          .doc(docId)
-          .update({
+      final SharedPreferences prefs =
+          await SharedPreferences.getInstance();
+      final String key = 'resource_like_counted_$docId';
+
+      if (prefs.getBool(key) ?? false) {
+        if (mounted) {
+          setState(() => likedDocs.add(docId));
+        }
+        return;
+      }
+
+      await _firestore.collection('resources').doc(docId).update({
         'likes': FieldValue.increment(1),
       });
+
+      await prefs.setBool(key, true);
+      final List<String> savedLikes =
+          prefs.getStringList('liked_resources') ?? [];
+      if (!savedLikes.contains(docId)) {
+        savedLikes.add(docId);
+        await prefs.setStringList('liked_resources', savedLikes);
+      }
+
       if (!mounted) return;
-      setState(() {
-        likedDocs.add(docId);
-      });
+      setState(() => likedDocs.add(docId));
     } catch (e) {
       debugPrint('Like error: $e');
+    } finally {
+      _likeInProgress.remove(docId);
     }
   }
+
   Future<void> _rateResource(
     String docId,
     double rating,
   ) async {
-    if (ratedDocs.contains(docId)) {
+    if (ratedDocs.contains(docId) || _rateInProgress.contains(docId)) {
       return;
     }
+
+    _rateInProgress.add(docId);
     try {
+      final SharedPreferences prefs =
+          await SharedPreferences.getInstance();
+      final String key = 'resource_rate_counted_$docId';
+
+      if (prefs.getBool(key) ?? false) {
+        if (mounted) {
+          setState(() => ratedDocs.add(docId));
+        }
+        return;
+      }
+
       final DocumentSnapshot doc =
-          await _firestore
-              .collection('resources')
-              .doc(docId)
-              .get();
-      final dynamic rawRating =
-          doc.data() is Map
-              ? (doc.data() as Map)['rating']
-              : null;
-      final dynamic rawRatingCount =
-          doc.data() is Map
-              ? (doc.data() as Map)['ratingCount']
-              : null;
-      final double currentRating =
-          rawRating is num
-              ? rawRating.toDouble()
-              : double.tryParse(
-                    rawRating?.toString() ?? '',
-                  ) ??
-                  0.0;
-      final int ratingCount =
-          rawRatingCount is num
-              ? rawRatingCount.toInt()
-              : int.tryParse(
-                    rawRatingCount?.toString() ?? '',
-                  ) ??
-                  0;
+          await _firestore.collection('resources').doc(docId).get();
+
+      final dynamic rawData = doc.data();
+      final Map<String, dynamic> data =
+          rawData is Map ? Map<String, dynamic>.from(rawData) : {};
+
+      final double currentRating = data['rating'] is num
+          ? (data['rating'] as num).toDouble()
+          : double.tryParse(data['rating']?.toString() ?? '') ?? 0.0;
+      final int ratingCount = data['ratingCount'] is num
+          ? (data['ratingCount'] as num).toInt()
+          : int.tryParse(data['ratingCount']?.toString() ?? '') ?? 0;
+
       final double newRating =
-          ((currentRating * ratingCount) + rating) /
-          (ratingCount + 1);
-      await _firestore
-          .collection('resources')
-          .doc(docId)
-          .update({
+          ((currentRating * ratingCount) + rating) / (ratingCount + 1);
+
+      await _firestore.collection('resources').doc(docId).update({
         'rating': newRating,
         'ratingCount': FieldValue.increment(1),
       });
+
+      await prefs.setBool(key, true);
+      final List<String> savedRatings =
+          prefs.getStringList('rated_resources') ?? [];
+      if (!savedRatings.contains(docId)) {
+        savedRatings.add(docId);
+        await prefs.setStringList('rated_resources', savedRatings);
+      }
+
       if (!mounted) return;
-      setState(() {
-        ratedDocs.add(docId);
-      });
+      setState(() => ratedDocs.add(docId));
     } catch (e) {
       debugPrint('Rating error: $e');
+    } finally {
+      _rateInProgress.remove(docId);
     }
   }
+
   // ---------------------------------------------------------------------------
   // ADMIN ACCESS
   // ---------------------------------------------------------------------------
@@ -2623,11 +2755,14 @@ Rules:
                                                 size:
                                                     20,
                                               ),
-                                              onPressed:
-                                                  () =>
-                                                      _likeResource(
-                                                docId,
-                                              ),
+                                              tooltip: isLiked
+                                                  ? 'Already liked'
+                                                  : 'Like resource',
+                                              onPressed: isLiked
+                                                  ? null
+                                                  : () => _likeResource(
+                                                      docId,
+                                                    ),
                                             ),
                                             Text(
                                               '${data['likes'] ?? 0}',
