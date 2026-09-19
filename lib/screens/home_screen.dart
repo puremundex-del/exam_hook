@@ -156,6 +156,8 @@ class _MarqueeText extends StatefulWidget {
 class _MarqueeTextState extends State<_MarqueeText>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  double _cycleWidth = 1;
+  static const double _gap = 56;
 
   @override
   void initState() {
@@ -163,7 +165,16 @@ class _MarqueeTextState extends State<_MarqueeText>
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 18),
-    )..repeat();
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _MarqueeText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text || oldWidget.style != widget.style) {
+      _controller.stop();
+      _controller.value = 0;
+    }
   }
 
   @override
@@ -172,33 +183,64 @@ class _MarqueeTextState extends State<_MarqueeText>
     super.dispose();
   }
 
+  void _startAnimation(double cycleWidth) {
+    if (cycleWidth <= 1) return;
+    _cycleWidth = cycleWidth;
+    final double seconds = (cycleWidth / 42).clamp(12.0, 28.0);
+    _controller.duration = Duration(seconds: seconds.round());
+    if (!_controller.isAnimating) {
+      _controller.repeat();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (_, constraints) {
-        final double availableWidth = constraints.maxWidth;
+        final TextPainter painter = TextPainter(
+          text: TextSpan(text: widget.text, style: widget.style),
+          textDirection: Directionality.of(context),
+          maxLines: 1,
+        )..layout();
+
+        final double textWidth = painter.width;
+        final double cycleWidth = textWidth + _gap;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _startAnimation(cycleWidth);
+        });
+
         return ClipRect(
-          child: AnimatedBuilder(
-            animation: _controller,
-            builder: (_, __) {
-              return Align(
-                alignment: Alignment.centerLeft,
-                child: FractionallySizedBox(
-                  widthFactor: 1,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      widget.text,
-                      maxLines: 3,
-                      softWrap: true,
-                      overflow: TextOverflow.visible,
-                      textAlign: TextAlign.center,
-                      style: widget.style,
-                    ),
+          child: SizedBox(
+            width: constraints.maxWidth,
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (_, __) {
+                final double dx = -(_cycleWidth * _controller.value);
+                return Transform.translate(
+                  offset: Offset(dx, 0),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        widget.text,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.visible,
+                        style: widget.style,
+                      ),
+                      const SizedBox(width: _gap),
+                      Text(
+                        widget.text,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.visible,
+                        style: widget.style,
+                      ),
+                    ],
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         );
       },
@@ -314,8 +356,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadDailyQuotes() async {
-    // Always keep a message available so the marquee never disappears.
-    // The message changes automatically each calendar day.
+    // Generate exactly TWO fresh motivational statements for each calendar day.
+    // The generated pair is saved for that day so rebuilds do not regenerate it.
     try {
       final SharedPreferences prefs =
           await SharedPreferences.getInstance();
@@ -326,126 +368,166 @@ class _HomeScreenState extends State<HomeScreen> {
           '${now.day.toString().padLeft(2, '0')}';
 
       final String? savedDate = prefs.getString('daily_motivation_date');
-      final String? savedQuote = prefs.getString('daily_motivation_quote');
-      final String? savedAuthor = prefs.getString('daily_motivation_author');
+      final String? savedQuotesJson =
+          prefs.getString('daily_motivation_quotes');
 
-      if (savedDate == dateKey && savedQuote != null && savedQuote.trim().isNotEmpty) {
+      if (savedDate == dateKey &&
+          savedQuotesJson != null &&
+          savedQuotesJson.trim().isNotEmpty) {
+        try {
+          final decoded = jsonDecode(savedQuotesJson);
+          if (decoded is List && decoded.length >= 2) {
+            final List<Map<String, String>> savedQuotes = decoded
+                .take(2)
+                .whereType<Map>()
+                .map(
+                  (item) => <String, String>{
+                    'quote': (item['quote'] ?? '').toString().trim(),
+                    'author':
+                        (item['author'] ?? 'ExamHook AI').toString().trim(),
+                  },
+                )
+                .where((item) => item['quote']!.isNotEmpty)
+                .toList();
+
+            if (savedQuotes.length == 2) {
+              if (!mounted) return;
+              setState(() {
+                _dailyQuotes = savedQuotes;
+                _quotesLoading = false;
+              });
+              return;
+            }
+          }
+        } catch (e) {
+          debugPrint('Saved daily motivation decode error: $e');
+        }
+      }
+
+      final GenerativeModel? aiModel = model;
+      if (aiModel == null) {
+        debugPrint(
+          'Daily motivation cannot be generated because AI is unavailable.',
+        );
         if (!mounted) return;
         setState(() {
-          _dailyQuotes = [
-            {
-              'quote': savedQuote.trim(),
-              'author': (savedAuthor ?? 'ExamHook AI').trim(),
-            },
-          ];
+          _dailyQuotes = [];
           _quotesLoading = false;
         });
         return;
       }
 
-      String quote = '';
-      String author = 'ExamHook AI';
-
-      final GenerativeModel? aiModel = model;
-      if (aiModel != null) {
-        try {
-          final response = await aiModel.generateContent([
-            Content.text(
-              '''Create one complete original motivational statement for a high-school student studying today.
+      final response = await aiModel.generateContent([
+        Content.text(
+          """Create exactly TWO original motivational statements for a student studying today.
 Date: $dateKey
 Rules:
-- Return only the complete motivational statement.
-- Maximum 35 words.
-- Do not shorten, truncate, or cut off the statement.
-- No quotation marks, hashtags, emojis, politics, or famous quotes.
-- Make it encouraging and focused on learning, consistency, understanding, effort, and progress.
-- Write a natural, complete sentence that can be displayed in full.''',
-            ),
-          ]);
-          quote = (response.text ?? '')
-              .replaceAll(RegExp(r'^["“]|["”]$'), '')
-              .replaceAll(RegExp(r'\s+'), ' ')
-              .trim();
-        } catch (e) {
-          debugPrint('AI daily motivation error: $e');
-        }
+- Return exactly two complete statements, one per line.
+- Each statement may be up to 35 words and must be complete from beginning to end.
+- Do not shorten, truncate, or cut off either statement.
+- No quotation marks, numbering, hashtags, emojis, politics, or famous quotes.
+- Make both statements encouraging and focused on learning, consistency, understanding, discipline, confidence, and progress.
+- Make the two statements meaningfully different from each other.""",
+        ),
+      ]);
+
+      final String raw = (response.text ?? '')
+          .replaceAll('\r\n', '\n')
+          .replaceAll('\r', '\n')
+          .trim();
+
+      final List<String> generated = raw
+          .split(RegExp(r'\n+|\|\|\|'))
+          .map(
+            (line) => line
+                .replaceFirst(
+                  RegExp(r'^\s*(?:\d+[.)]|[-•])\s*'),
+                  '',
+                )
+                .replaceAll(RegExp(r'^[\"“]|[\"”]\s*$'), '')
+                .replaceAll(RegExp(r'\s+'), ' ')
+                .trim(),
+          )
+          .where((line) => line.isNotEmpty)
+          .take(2)
+          .toList();
+
+      if (generated.length < 2) {
+        throw StateError(
+          'AI did not return exactly two usable motivation statements.',
+        );
       }
 
-      // Offline/no-key fallback. The date seed makes the message change daily
-      // without changing the rest of the HomeScreen scope.
-      if (quote.isEmpty) {
-        const fallback = <String>[
-          'Small progress each day builds the knowledge you need for success.',
-          'Study with purpose today, and let your future self thank you tomorrow.',
-          'Every question you solve is another step toward mastering your goals.',
-          'Consistency turns difficult topics into familiar ones.',
-          'Keep learning, keep practising, and keep moving forward.',
-          'Your effort today is building the skills you will use tomorrow.',
-          'Focus on understanding, not just memorising, and progress will follow.',
-          'A little revision every day can make a big difference over time.',
-          'Mistakes are part of learning; use them to discover what to improve.',
-          'Believe in your ability to learn, then prove it through steady practice.',
-        ];
-        final int seed = now.year * 10000 + now.month * 100 + now.day;
-        quote = fallback[math.Random(seed).nextInt(fallback.length)];
-        author = 'ExamHook';
+      final List<Map<String, String>> quotes = generated
+          .map(
+            (quote) => <String, String>{
+              'quote': quote,
+              'author': 'ExamHook AI',
+            },
+          )
+          .toList();
+
+      // Deterministically shuffle the two generated statements for this day.
+      final int daySeed = now.year * 10000 + now.month * 100 + now.day;
+      if (daySeed.isOdd) {
+        final first = quotes[0];
+        quotes[0] = quotes[1];
+        quotes[1] = first;
       }
 
       await prefs.setString('daily_motivation_date', dateKey);
-      await prefs.setString('daily_motivation_quote', quote);
-      await prefs.setString('daily_motivation_author', author);
+      await prefs.setString('daily_motivation_quotes', jsonEncode(quotes));
 
       if (!mounted) return;
       setState(() {
-        _dailyQuotes = [
-          {'quote': quote, 'author': author},
-        ];
+        _dailyQuotes = quotes;
         _quotesLoading = false;
       });
     } catch (e) {
       debugPrint('Daily motivation error: $e');
       if (!mounted) return;
       setState(() {
-        _dailyQuotes = [
-          {
-            'quote': 'Keep learning, keep practising, and keep moving forward.',
-            'author': 'ExamHook',
-          },
-        ];
+        _dailyQuotes = [];
         _quotesLoading = false;
       });
     }
   }
 
   Widget _buildDailyQuotesMarquee(bool isDark) {
-    final List<Map<String, String>> messages = _dailyQuotes.isEmpty
-        ? const [
-            {
-              'quote': 'Keep learning, keep practising, and keep moving forward.',
-              'author': 'ExamHook',
-            },
-          ]
-        : _dailyQuotes;
-    final text = messages
+    final List<Map<String, String>> messages = _dailyQuotes;
+    final String text = messages
         .map((q) => '“${q['quote']}” — ${q['author']}')
         .join('     ✦     ');
+
+    if (text.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+
     return Container(
-      constraints: const BoxConstraints(minHeight: 92),
+      height: 64,
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFF00C896), Color(0xFF3B82F6), Color(0xFF8B5CF6)],
         ),
         borderRadius: BorderRadius.circular(18),
-        boxShadow: const [BoxShadow(blurRadius: 10, offset: Offset(0, 4), color: Colors.black12)],
+        boxShadow: const [
+          BoxShadow(
+            blurRadius: 10,
+            offset: Offset(0, 4),
+            color: Colors.black12,
+          ),
+        ],
       ),
       clipBehavior: Clip.antiAlias,
-      child: _MarqueeText(
-        text: text,
-        style: GoogleFonts.poppins(
-          color: Colors.white,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
+      child: Center(
+        child: _MarqueeText(
+          text: text,
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );
